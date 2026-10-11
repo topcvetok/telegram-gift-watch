@@ -24,7 +24,7 @@ def gift(gift_id, price, **extra):
 class TonnelScoringTests(unittest.TestCase):
     def setUp(self):
         self.config = {
-            "max_lot_rub": 1000,
+            "max_lot_rub": 2000,
             "min_comparables": 5,
             "floor_cluster_max_spread_fraction": 0.08,
             "min_discount_fraction": 0.15,
@@ -53,7 +53,7 @@ class TonnelScoringTests(unittest.TestCase):
         self.assertIsNone(watch.score(gift(1, 2.0, premarketData={}), self.floor, Decimal("124.42"), self.config))
 
     def test_budget_is_enforced(self):
-        self.assertIsNone(watch.score(gift(1, 9.0), self.floor, Decimal("124.42"), self.config))
+        self.assertIsNone(watch.score(gift(1, 20.0), self.floor, Decimal("124.42"), self.config))
 
     def test_slug(self):
         self.assertEqual(watch.slug(gift(123, 2.0)), "chillflame-123")
