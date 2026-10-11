@@ -156,6 +156,7 @@ def slug(item):
 def format_alert(item, result, config):
     nft_slug = slug(item)
     nft_link = f"https://t.me/nft/{nft_slug}" if nft_slug else ""
+    listing_link = f"https://t.me/tonnel_network_bot/gift?startapp={item['gift_id']}"
     return (
         "🔎 Возможный дешёвый лот на Tonnel\n"
         f"{item.get('name', 'Подарок')} #{item.get('gift_num', '?')}\n"
@@ -169,7 +170,7 @@ def format_alert(item, result, config):
         "Перед покупкой сверяй цену и доступность в Tonnel.\n"
         f"ID Tonnel: {item['gift_id']}\n"
         + (nft_link + "\n" if nft_link else "")
-        + "https://t.me/tonnel_network_bot"
+        + "Открыть объявление: " + listing_link
     )
 
 
