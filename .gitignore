@@ -1,0 +1,4 @@
+secrets.json
+state.sqlite3*
+__pycache__/
+.venv/

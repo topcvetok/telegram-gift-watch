@@ -1,0 +1,45 @@
+{
+  "budget_rub": 5000,
+  "reserve_rub": 1000,
+  "max_lot_rub": 1000,
+  "min_scenario_profit_rub": 100,
+  "min_roi_fraction": 0.15,
+  "rub_per_ton": null,
+  "rub_rate_checked_at": null,
+  "poll_seconds": 60,
+  "max_pages": 2,
+  "tonnel_collections": [
+    "Chill Flame",
+    "Ice Cream",
+    "Instant Ramen",
+    "Lol Pop",
+    "Candy Cane",
+    "Clover Pin",
+    "Evil Eye",
+    "Jelly Bunny"
+  ],
+  "floor_limit": 12,
+  "latest_limit": 30,
+  "request_pause_seconds": 1.2,
+  "min_comparables": 5,
+  "floor_cluster_max_spread_fraction": 0.08,
+  "min_discount_fraction": 0.15,
+  "undercut_ton": 0.01,
+  "tonnel_round_trip_cost_fraction": 0.02,
+  "fixed_cost_ton": 0,
+  "costs": {
+    "tonnel": {
+      "checked_at": null,
+      "sell_fee_fraction": null,
+      "extra_buy_rub": null,
+      "transfer_and_withdraw_rub": null
+    },
+    "mrkt": {
+      "checked_at": null,
+      "sell_fee_fraction": null,
+      "extra_buy_rub": null,
+      "transfer_and_withdraw_rub": null
+    }
+  },
+  "watchlist": []
+}
