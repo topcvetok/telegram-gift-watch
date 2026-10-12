@@ -17,6 +17,8 @@ except ImportError:
 from bot import ROOT, telegram
 
 TONNEL_URL = "https://gifts2.tonnel.network/api/pageGifts"
+EVENTS_URL = "https://gifts.coffin.meme/api/marketplace/events"
+EVENTS_WS_URL = "wss://gifts.coffin.meme/api/marketplace/ws"
 RATE_URL = "https://api.coingecko.com/api/v3/simple/price"
 HEADERS = {
     "accept": "*/*",
@@ -343,6 +345,148 @@ def format_alert(item, result, config):
     )
 
 
+def send_if_new_price(item, result, config, secrets, db, send):
+    key = str(item["gift_id"])
+    old = db.execute("SELECT price FROM tonnel_alerts WHERE id=?", (key,)).fetchone()
+    if old and result["price"] >= decimal(old[0]):
+        return False
+    text = format_alert(item, result, config)
+    if not send:
+        print(text + "\n")
+        return False
+    telegram(secrets, text)
+    db.execute(
+        "INSERT OR REPLACE INTO tonnel_alerts VALUES (?, ?, ?)",
+        (key, str(result["price"]), time.time()),
+    )
+    db.commit()
+    return True
+
+
+def event_item(event):
+    if not isinstance(event, dict) or event.get("type") not in {
+        "listing.created", "listing.price_changed",
+    }:
+        return None
+    data = event.get("data")
+    if not isinstance(data, dict) or data.get("asset") != "TON":
+        return None
+    if event.get("type") == "listing.created" and data.get("sale_type") != "FIXED":
+        return None
+    gift = data.get("gift")
+    if not isinstance(gift, dict) or gift.get("gift_id") is None:
+        return None
+    return {
+        **gift,
+        "name": gift.get("gift_name"),
+        "price": data.get("price"),
+        "asset": "TON",
+        "status": "forsale",
+        "auction": None,
+        "dutchAuctionData": None,
+        "premarketData": None,
+        "underLoan": False,
+    }
+
+
+def process_event(event, config, secrets, db, send=True):
+    event_id = event.get("eventId") if isinstance(event, dict) else None
+    if not isinstance(event_id, str) or not event_id:
+        return False
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS tonnel_events "
+        "(id TEXT PRIMARY KEY, processed REAL)"
+    )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS tonnel_stream_state "
+        "(key TEXT PRIMARY KEY, value TEXT)"
+    )
+    if db.execute("SELECT 1 FROM tonnel_events WHERE id=?", (event_id,)).fetchone():
+        return False
+
+    delivered = False
+    item = event_item(event)
+    if item is not None and item.get("name") in config["tonnel_collections"]:
+        rate = load_rate(db)
+        floor_book = load_collection_book(db, item["name"], config)
+        variant_books = load_variant_books(
+            db, item["name"], [item], rate, config,
+            [int(config["variant_query_budget_per_cycle"])],
+        )
+        result = best_score(item, floor_book, variant_books, rate, config)
+        if result is not None:
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS tonnel_alerts "
+                "(id TEXT PRIMARY KEY, price TEXT, sent REAL)"
+            )
+            delivered = send_if_new_price(item, result, config, secrets, db, send)
+
+    now = time.time()
+    db.execute("INSERT INTO tonnel_events VALUES (?, ?)", (event_id, now))
+    db.execute(
+        "INSERT OR REPLACE INTO tonnel_stream_state VALUES ('cursor', ?)",
+        (event_id,),
+    )
+    db.execute("DELETE FROM tonnel_events WHERE processed < ?", (now - 8 * 86400,))
+    db.commit()
+    return delivered
+
+
+def replay_events(config, secrets, db, send=True):
+    row = db.execute(
+        "SELECT value FROM tonnel_stream_state WHERE key='cursor'"
+    ).fetchone()
+    if not row:
+        return 0
+    cursor = row[0]
+    delivered = 0
+    while cursor:
+        payload = request(
+            "GET", EVENTS_URL,
+            params={"after": cursor, "limit": 100},
+        )
+        events = payload.get("events") if isinstance(payload, dict) else None
+        if not isinstance(events, list) or not events:
+            break
+        for event in events:
+            delivered += int(process_event(event, config, secrets, db, send))
+        next_cursor = payload.get("nextAfter")
+        if not isinstance(next_cursor, str) or next_cursor == cursor or len(events) < 100:
+            break
+        cursor = next_cursor
+    return delivered
+
+
+def stream_events(config, secrets, db, send=True, duration=14340):
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS tonnel_stream_state "
+        "(key TEXT PRIMARY KEY, value TEXT)"
+    )
+    db.commit()
+    deadline = time.monotonic() + max(60, int(duration))
+    delivered = 0
+    while time.monotonic() < deadline:
+        try:
+            with requests.Session(impersonate="chrome") as session:
+                socket = session.ws_connect(EVENTS_WS_URL, timeout=20)
+                delivered += replay_events(config, secrets, db, send)
+                print("Подключён поток новых лотов Tonnel.", flush=True)
+                while time.monotonic() < deadline:
+                    raw, _ = socket.recv()
+                    event = json.loads(raw)
+                    delivered += int(process_event(event, config, secrets, db, send))
+                socket.close()
+        except SourceRateLimited as exc:
+            delay = min(exc.retry_after, 300)
+            print(f"Поток ждёт лимит Tonnel: {delay} сек.", file=sys.stderr, flush=True)
+            time.sleep(min(delay, max(0, deadline - time.monotonic())))
+        except Exception as exc:
+            print(f"Переподключение к потоку Tonnel: {exc}", file=sys.stderr, flush=True)
+            time.sleep(min(3, max(0, deadline - time.monotonic())))
+    print(f"Поток завершён; отправлено {delivered} офферов.", flush=True)
+    return delivered
+
+
 def load_rate(db, max_age=3600):
     db.execute("CREATE TABLE IF NOT EXISTS rates (symbol TEXT PRIMARY KEY, value TEXT, checked REAL)")
     row = db.execute("SELECT value, checked FROM rates WHERE symbol='TONRUB'").fetchone()
@@ -390,21 +534,8 @@ def run_cycle(config, secrets, db, send=False):
                 if result is None:
                     continue
                 candidates += 1
-                key = str(item["gift_id"])
-                old = db.execute("SELECT price FROM tonnel_alerts WHERE id=?", (key,)).fetchone()
-                if old and result["price"] >= decimal(old[0]):
-                    continue
-                text = format_alert(item, result, config)
-                if send:
-                    telegram(secrets, text)
-                    db.execute(
-                        "INSERT OR REPLACE INTO tonnel_alerts VALUES (?, ?, ?)",
-                        (key, str(result["price"]), time.time()),
-                    )
-                    db.commit()
+                if send_if_new_price(item, result, config, secrets, db, send):
                     delivered += 1
-                else:
-                    print(text + "\n")
         except SourceRateLimited:
             raise
         except RuntimeError as exc:
@@ -423,11 +554,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true", help="Один цикл и выход")
     parser.add_argument("--send", action="store_true", help="Отправлять подходящие сигналы")
+    parser.add_argument(
+        "--stream-seconds", type=int, default=0,
+        help="Слушать поток новых лотов указанное число секунд",
+    )
     args = parser.parse_args()
     config = json.loads((ROOT / "config.json").read_text())
     secrets = json.loads((ROOT / "secrets.json").read_text())
     interval = max(60, int(config["poll_seconds"]))
     with sqlite3.connect(ROOT / "state.sqlite3") as db:
+        if args.stream_seconds:
+            stream_events(config, secrets, db, args.send, args.stream_seconds)
+            return
         while True:
             delay = interval
             try:

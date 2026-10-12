@@ -9,7 +9,7 @@ User=giftwatch
 Group=giftwatch
 WorkingDirectory=/opt/telegram-gift-watch
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/telegram-gift-watch/.venv/bin/python -u tonnel_watch.py --send
+ExecStart=/opt/telegram-gift-watch/.venv/bin/python -u tonnel_watch.py --send --stream-seconds 31536000
 Restart=always
 RestartSec=30
 UMask=0077

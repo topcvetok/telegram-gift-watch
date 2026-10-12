@@ -2,8 +2,14 @@ name: Gift Watch
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
+    inputs:
+      stream_seconds:
+        description: Listener lifetime before state is saved
+        required: false
+        default: "3300"
+        type: string
 
 permissions:
   actions: write
@@ -16,7 +22,7 @@ concurrency:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -53,8 +59,13 @@ jobs:
           Path("secrets.json").chmod(0o600)
           PY
 
-      - name: Check listings and send alerts
+      - name: Check current listings
         run: python -u tonnel_watch.py --once --send
+
+      - name: Listen for new listings in real time
+        env:
+          STREAM_SECONDS: ${{ inputs.stream_seconds || '3300' }}
+        run: python -u tonnel_watch.py --send --stream-seconds "${STREAM_SECONDS}"
 
       - name: Save monitor state
         if: always()
@@ -74,3 +85,14 @@ jobs:
           while read -r cache_id; do
             [ -z "${cache_id}" ] || gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${cache_id}"
           done
+
+      - name: Queue the next listener
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          queued=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow gift-watch.yml \
+            --status queued --limit 1 --json databaseId --jq 'length')
+          if [ "${queued}" = "0" ]; then
+            gh workflow run gift-watch.yml --repo "${GITHUB_REPOSITORY}"
+          fi

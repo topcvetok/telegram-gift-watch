@@ -204,6 +204,59 @@ class TonnelScoringTests(unittest.TestCase):
             message,
         )
 
+    def test_listing_event_becomes_regular_market_item(self):
+        event = {
+            "eventId": "event-1",
+            "type": "listing.created",
+            "data": {
+                "gift": {
+                    "gift_id": 42,
+                    "gift_num": 7,
+                    "gift_name": "Chill Flame",
+                    "model": "Lego (3%)",
+                    "backdrop": "Black (1%)",
+                },
+                "price": 5.5,
+                "asset": "TON",
+                "sale_type": "FIXED",
+            },
+        }
+        item = watch.event_item(event)
+        self.assertTrue(watch.eligible(item))
+        self.assertEqual(item["name"], "Chill Flame")
+        self.assertEqual(item["price"], 5.5)
+
+    def test_price_change_event_is_supported(self):
+        event = {
+            "eventId": "event-2",
+            "type": "listing.price_changed",
+            "data": {
+                "gift": {
+                    "gift_id": 42,
+                    "gift_num": 7,
+                    "gift_name": "Chill Flame",
+                },
+                "previous_price": 5.5,
+                "price": 5.0,
+                "asset": "TON",
+            },
+        }
+        self.assertEqual(watch.event_item(event)["price"], 5.0)
+
+    def test_premarket_and_non_fixed_events_are_ignored(self):
+        gift_data = {
+            "gift": {"gift_id": 42, "gift_name": "Chill Flame"},
+            "price": 5.0,
+            "asset": "TON",
+            "sale_type": "DUTCH",
+        }
+        self.assertIsNone(watch.event_item({
+            "eventId": "event-3", "type": "listing.created", "data": gift_data,
+        }))
+        self.assertIsNone(watch.event_item({
+            "eventId": "event-4", "type": "premarket.listing_created", "data": gift_data,
+        }))
+
 
 if __name__ == "__main__":
     unittest.main()
