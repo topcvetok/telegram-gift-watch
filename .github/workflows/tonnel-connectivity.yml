@@ -1,0 +1,27 @@
+name: Tonnel connectivity test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Probe public Tonnel endpoint
+        run: |
+          python - <<'PY'
+          from tonnel_watch import fetch_collection
+
+          gifts = fetch_collection("Plush Pepe", {"price": 1}, 1)
+          print(f"Tonnel probe succeeded; rows={len(gifts)}")
+          PY

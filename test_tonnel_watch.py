@@ -77,6 +77,22 @@ class TonnelScoringTests(unittest.TestCase):
         self.assertEqual(result["basis"], "модель: Rare Model (1%)")
 
     def test_backdrop_floor_can_trigger(self):
+        item = gift(1, 5.0, backdrop="Onyx Black (1%)")
+        backdrop_book = [
+            gift(i, price, backdrop="Onyx Black (1%)")
+            for i, price in enumerate([7.0, 7.1, 7.2, 7.3], 20)
+        ]
+        result = watch.best_score(
+            item,
+            self.floor,
+            {("backdrop", "Onyx Black (1%)"): backdrop_book},
+            Decimal("124.42"),
+            self.config,
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["basis"], "фон: Onyx Black (1%)")
+
+    def test_other_backdrop_cannot_be_purchase_basis(self):
         item = gift(1, 5.0, backdrop="Rare Blue (1%)")
         backdrop_book = [
             gift(i, price, backdrop="Rare Blue (1%)")
@@ -89,8 +105,12 @@ class TonnelScoringTests(unittest.TestCase):
             Decimal("124.42"),
             self.config,
         )
-        self.assertIsNotNone(result)
-        self.assertEqual(result["basis"], "фон: Rare Blue (1%)")
+        self.assertIsNone(result)
+
+    def test_allowed_backdrop_names_ignore_case_and_rarity_suffix(self):
+        for backdrop in ("Black", "ONYX BLACK (0.5%)", "Gunmetal", "Midnight Blue (2%)"):
+            with self.subTest(backdrop=backdrop):
+                self.assertTrue(watch.allowed_backdrop(backdrop))
 
     def test_rate_limit_is_not_retried_immediately(self):
         class Response:

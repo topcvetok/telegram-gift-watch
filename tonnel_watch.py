@@ -25,6 +25,12 @@ HEADERS = {
     "origin": "https://market.tonnel.network",
     "referer": "https://market.tonnel.network/",
 }
+ALLOWED_BACKDROP_NAMES = {
+    "black",
+    "onyx black",
+    "gunmetal",
+    "midnight blue",
+}
 
 
 class SourceRateLimited(RuntimeError):
@@ -43,6 +49,13 @@ def decimal(value, label="число"):
     if not result.is_finite() or result < 0:
         raise ValueError(f"Значение должно быть неотрицательным: {label}")
     return result
+
+
+def allowed_backdrop(value):
+    if not isinstance(value, str):
+        return False
+    name = re.sub(r"\s*\([^)]*%\)\s*$", "", value).strip().casefold()
+    return name in ALLOWED_BACKDROP_NAMES
 
 
 def request(method, url, *, body=None, params=None, attempts=3):
@@ -114,6 +127,8 @@ def load_variant_books(db, collection, items, rate, config, query_budget):
             continue
         for scope in ("model", "backdrop"):
             trait = item.get(scope)
+            if scope == "backdrop" and not allowed_backdrop(trait):
+                continue
             key = (scope, trait)
             if isinstance(trait, str) and trait.strip() and key not in seen:
                 seen.add(key)
@@ -281,6 +296,8 @@ def best_score(item, collection_book, variant_books, rate, config):
     labels = {"model": "модель", "backdrop": "фон"}
     for scope, label in labels.items():
         trait = item.get(scope)
+        if scope == "backdrop" and not allowed_backdrop(trait):
+            continue
         book = variant_books.get((scope, trait))
         if not book:
             continue

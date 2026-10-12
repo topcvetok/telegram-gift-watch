@@ -1,0 +1,23 @@
+[Unit]
+Description=Telegram Gift Watch
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=giftwatch
+Group=giftwatch
+WorkingDirectory=/opt/telegram-gift-watch
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/telegram-gift-watch/.venv/bin/python -u tonnel_watch.py --send
+Restart=always
+RestartSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/opt/telegram-gift-watch
+
+[Install]
+WantedBy=multi-user.target
