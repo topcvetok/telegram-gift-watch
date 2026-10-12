@@ -1,3 +1,4 @@
+import sqlite3
 import unittest
 from decimal import Decimal
 from unittest.mock import patch
@@ -122,6 +123,61 @@ class TonnelScoringTests(unittest.TestCase):
                 watch.request("GET", "https://example.test", attempts=3)
         self.assertEqual(request.call_count, 1)
         self.assertEqual(raised.exception.retry_after, 123)
+
+    def test_same_or_higher_price_is_not_sent_again(self):
+        config = dict(self.config)
+        config.update({
+            "variant_query_budget_per_cycle": 0,
+            "tonnel_collections": ["Chill Flame"],
+            "request_pause_seconds": 0,
+            "latest_limit": 30,
+        })
+        item = gift(1, 2.5)
+        results = [
+            {"price": Decimal("2.5")},
+            {"price": Decimal("2.5")},
+            {"price": Decimal("2.6")},
+        ]
+        with sqlite3.connect(":memory:") as db, \
+                patch.object(watch, "load_rate", return_value=Decimal("100")), \
+                patch.object(watch, "load_collection_book", return_value=[]), \
+                patch.object(watch, "fetch_collection", return_value=[item]), \
+                patch.object(watch, "load_variant_books", return_value={}), \
+                patch.object(watch, "best_score", side_effect=results), \
+                patch.object(watch, "format_alert", return_value="offer"), \
+                patch.object(watch, "telegram") as send:
+            for _ in results:
+                watch.run_cycle(config, {}, db, send=True)
+            self.assertEqual(send.call_count, 1)
+            saved = db.execute("SELECT price FROM tonnel_alerts WHERE id='1'").fetchone()
+            self.assertEqual(saved[0], "2.5")
+
+    def test_lower_price_is_sent_again(self):
+        config = dict(self.config)
+        config.update({
+            "variant_query_budget_per_cycle": 0,
+            "tonnel_collections": ["Chill Flame"],
+            "request_pause_seconds": 0,
+            "latest_limit": 30,
+        })
+        item = gift(1, 2.5)
+        results = [
+            {"price": Decimal("2.5")},
+            {"price": Decimal("2.4")},
+        ]
+        with sqlite3.connect(":memory:") as db, \
+                patch.object(watch, "load_rate", return_value=Decimal("100")), \
+                patch.object(watch, "load_collection_book", return_value=[]), \
+                patch.object(watch, "fetch_collection", return_value=[item]), \
+                patch.object(watch, "load_variant_books", return_value={}), \
+                patch.object(watch, "best_score", side_effect=results), \
+                patch.object(watch, "format_alert", return_value="offer"), \
+                patch.object(watch, "telegram") as send:
+            for _ in results:
+                watch.run_cycle(config, {}, db, send=True)
+            self.assertEqual(send.call_count, 2)
+            saved = db.execute("SELECT price FROM tonnel_alerts WHERE id='1'").fetchone()
+            self.assertEqual(saved[0], "2.4")
 
     def test_budget_is_enforced(self):
         self.assertIsNone(watch.score(gift(1, 20.0), self.floor, Decimal("124.42"), self.config))
