@@ -6,7 +6,7 @@
   "min_roi_fraction": 0.15,
   "rub_per_ton": null,
   "rub_rate_checked_at": null,
-  "poll_seconds": 60,
+  "poll_seconds": 120,
   "max_pages": 2,
   "tonnel_collections": [
     "Chill Flame",
@@ -19,6 +19,7 @@
     "Jelly Bunny"
   ],
   "floor_limit": 12,
+  "collection_floor_cache_seconds": 900,
   "latest_limit": 30,
   "request_pause_seconds": 1.2,
   "min_comparables": 5,
@@ -28,7 +29,7 @@
   "variant_floor_limit": 10,
   "variant_cache_seconds": 1800,
   "variant_workers": 1,
-  "variant_query_budget_per_cycle": 4,
+  "variant_query_budget_per_cycle": 2,
   "min_discount_fraction": 0.15,
   "undercut_ton": 0.01,
   "tonnel_round_trip_cost_fraction": 0.02,

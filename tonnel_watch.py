@@ -172,6 +172,34 @@ def load_variant_books(db, collection, items, rate, config, query_budget):
     return books
 
 
+def load_collection_book(db, collection, config):
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS tonnel_collection_books ("
+        "collection TEXT PRIMARY KEY, payload TEXT, checked REAL)"
+    )
+    row = db.execute(
+        "SELECT payload, checked FROM tonnel_collection_books WHERE collection=?",
+        (collection,),
+    ).fetchone()
+    now = time.time()
+    if row and now - float(row[1]) <= float(config["collection_floor_cache_seconds"]):
+        try:
+            return json.loads(row[0])
+        except (TypeError, ValueError):
+            pass
+    book = fetch_collection(
+        collection,
+        {"price": 1, "gift_id": -1},
+        int(config["floor_limit"]),
+    )
+    db.execute(
+        "INSERT OR REPLACE INTO tonnel_collection_books VALUES (?, ?, ?)",
+        (collection, json.dumps(book, ensure_ascii=False), now),
+    )
+    db.commit()
+    return book
+
+
 def eligible(item):
     return (
         isinstance(item, dict)
@@ -323,7 +351,7 @@ def run_cycle(config, secrets, db, send=False):
     variant_query_budget = [int(config["variant_query_budget_per_cycle"])]
     for index, collection in enumerate(config["tonnel_collections"]):
         try:
-            floor_book = fetch_collection(collection, {"price": 1, "gift_id": -1}, int(config["floor_limit"]))
+            floor_book = load_collection_book(db, collection, config)
             time.sleep(float(config["request_pause_seconds"]))
             newest = fetch_collection(
                 collection,
