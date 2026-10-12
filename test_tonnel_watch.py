@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -21,6 +22,29 @@ def gift(gift_id, price, **extra):
     }
     value.update(extra)
     return value
+
+
+def sale_event(event_id, price, occurred, **gift_extra):
+    sale_gift = {
+        "gift_id": event_id,
+        "gift_num": event_id,
+        "gift_name": "Chill Flame",
+        "model": "Rare Model (1%)",
+        "backdrop": "Black (1%)",
+        "symbol": "Star (1%)",
+    }
+    sale_gift.update(gift_extra)
+    return {
+        "eventId": f"sale-{event_id}",
+        "type": "sale.completed",
+        "occurredAt": datetime.fromtimestamp(occurred, timezone.utc).isoformat(),
+        "data": {
+            "gift": sale_gift,
+            "price": price,
+            "asset": "TON",
+            "source": "FIXED",
+        },
+    }
 
 
 class TonnelScoringTests(unittest.TestCase):
@@ -203,6 +227,95 @@ class TonnelScoringTests(unittest.TestCase):
             "https://t.me/tonnel_network_bot/gift?startapp=-660800007",
             message,
         )
+
+    def test_sale_event_is_recorded_once(self):
+        with sqlite3.connect(":memory:") as db:
+            event = sale_event(10, 7.5, watch.time.time())
+            self.assertTrue(watch.record_sale(event, db))
+            self.assertTrue(watch.record_sale(event, db))
+            rows = db.execute(
+                "SELECT gift_name, model, price FROM tonnel_sales"
+            ).fetchall()
+        self.assertEqual(rows, [("Chill Flame", "Rare Model (1%)", "7.5")])
+
+    def test_sales_metrics_use_exact_model_basis(self):
+        now = watch.time.time()
+        with sqlite3.connect(":memory:") as db:
+            db.execute(
+                "CREATE TABLE tonnel_stream_state (key TEXT PRIMARY KEY, value TEXT)"
+            )
+            db.execute(
+                "INSERT INTO tonnel_stream_state VALUES ('sales_started_at', ?)",
+                (str(now - 7200),),
+            )
+            watch.record_sale(sale_event(1, 7.0, now - 100), db)
+            watch.record_sale(sale_event(2, 9.0, now - 90, model="Other"), db)
+            metrics = watch.sales_metrics(
+                gift(50, 5.0, model="Rare Model (1%)"),
+                {"basis_scope": "model", "basis_trait": "Rare Model (1%)"},
+                db,
+                now,
+            )
+        self.assertEqual(metrics["collection_sales_24h"], 2)
+        self.assertEqual(metrics["basis_sales_24h"], 1)
+        self.assertEqual(metrics["median_sale"], Decimal("7.0"))
+        self.assertAlmostEqual(metrics["sales_history_hours"], 2.0)
+
+    def test_real_sales_can_reject_apparent_profit(self):
+        now = watch.time.time()
+        item = gift(1, 5.0)
+        floor = [gift(i, p) for i, p in enumerate([7.0, 7.1, 7.2, 7.3, 7.4], 2)]
+        result = watch.best_score(item, floor, {}, Decimal("100"), self.config)
+        with sqlite3.connect(":memory:") as db:
+            for index, price in enumerate([5.1, 5.2, 5.3], 20):
+                watch.record_sale(sale_event(index, price, now - index), db)
+            self.assertIsNone(
+                watch.apply_sales_evidence(item, result, db, self.config, now)
+            )
+
+    def test_quality_levels_use_real_sales_and_liquidity(self):
+        now = watch.time.time()
+        item = gift(1, 5.0)
+        floor = [gift(i, p) for i, p in enumerate([7.0, 7.1, 7.2, 7.3, 7.4], 2)]
+        result = watch.best_score(item, floor, {}, Decimal("100"), self.config)
+        with sqlite3.connect(":memory:") as db:
+            risky = watch.apply_sales_evidence(item, result, db, self.config, now)
+            self.assertEqual(risky["quality"], "рискованный")
+            for index in range(8):
+                watch.record_sale(sale_event(index + 100, 7.0, now - index), db)
+            strong = watch.apply_sales_evidence(item, result, db, self.config, now)
+        self.assertEqual(strong["quality"], "сильный")
+        self.assertEqual(strong["liquidity"], "высокая")
+        self.assertTrue(strong["sales_confirmed"])
+
+    def test_stream_accepts_collection_not_in_seed_list(self):
+        config = dict(self.config)
+        config.update({
+            "monitor_all_collections": True,
+            "tonnel_collections": ["Chill Flame"],
+            "variant_query_budget_per_event": 0,
+        })
+        event = {
+            "eventId": "all-collections",
+            "type": "listing.created",
+            "data": {
+                "gift": {
+                    "gift_id": 99,
+                    "gift_num": 1,
+                    "gift_name": "Unknown Collection",
+                },
+                "price": 5,
+                "asset": "TON",
+                "sale_type": "FIXED",
+            },
+        }
+        with sqlite3.connect(":memory:") as db, \
+                patch.object(watch, "load_rate", return_value=Decimal("100")), \
+                patch.object(watch, "load_collection_book", return_value=[]) as load, \
+                patch.object(watch, "load_variant_books", return_value={}), \
+                patch.object(watch, "best_score", return_value=None):
+            watch.process_event(event, config, {}, db, send=False)
+        load.assert_called_once_with(db, "Unknown Collection", config)
 
     def test_listing_event_becomes_regular_market_item(self):
         event = {

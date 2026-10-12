@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -291,6 +292,8 @@ def best_score(item, collection_book, variant_books, rate, config):
     collection_result = score(item, collection_book, rate, config)
     if collection_result is not None:
         collection_result["basis"] = "вся коллекция"
+        collection_result["basis_scope"] = "collection"
+        collection_result["basis_trait"] = item.get("name")
         results.append(collection_result)
 
     variant_config = dict(config)
@@ -309,6 +312,8 @@ def best_score(item, collection_book, variant_books, rate, config):
         result = score(item, book, rate, variant_config)
         if result is not None:
             result["basis"] = f"{label}: {trait}"
+            result["basis_scope"] = scope
+            result["basis_trait"] = trait
             results.append(result)
     if not results:
         return None
@@ -321,28 +326,222 @@ def slug(item):
     return f"{base}-{number}" if base and isinstance(number, int) and number > 0 else ""
 
 
+def event_timestamp(value):
+    if not isinstance(value, str) or not value:
+        return time.time()
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return time.time()
+
+
+def record_sale(event, db):
+    if not isinstance(event, dict) or event.get("type") != "sale.completed":
+        return False
+    data = event.get("data")
+    gift = data.get("gift") if isinstance(data, dict) else None
+    if not isinstance(gift, dict) or data.get("asset") != "TON":
+        return False
+    try:
+        price = decimal(data.get("price"), "цена продажи")
+    except ValueError:
+        return False
+    event_id = event.get("eventId")
+    name = gift.get("gift_name")
+    if not isinstance(event_id, str) or not event_id or not isinstance(name, str) or price <= 0:
+        return False
+    occurred = event_timestamp(event.get("occurredAt"))
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS tonnel_sales ("
+        "event_id TEXT PRIMARY KEY, gift_id TEXT, gift_name TEXT, model TEXT, "
+        "backdrop TEXT, symbol TEXT, price TEXT, source TEXT, occurred REAL)"
+    )
+    db.execute(
+        "INSERT OR IGNORE INTO tonnel_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            event_id, str(gift.get("gift_id", "")), name,
+            gift.get("model"), gift.get("backdrop"), gift.get("symbol"),
+            str(price), str(data.get("source", "")), occurred,
+        ),
+    )
+    db.execute("DELETE FROM tonnel_sales WHERE occurred < ?", (time.time() - 2 * 86400,))
+    return True
+
+
+def median_decimal(values):
+    ordered = sorted(values)
+    size = len(ordered)
+    if not size:
+        return None
+    middle = size // 2
+    if size % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def sales_metrics(item, result, db, now=None):
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS tonnel_stream_state "
+        "(key TEXT PRIMARY KEY, value TEXT)"
+    )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS tonnel_sales ("
+        "event_id TEXT PRIMARY KEY, gift_id TEXT, gift_name TEXT, model TEXT, "
+        "backdrop TEXT, symbol TEXT, price TEXT, source TEXT, occurred REAL)"
+    )
+    moment = float(now if now is not None else time.time())
+    cutoff = moment - 86400
+    name = item.get("name")
+    collection_rows = db.execute(
+        "SELECT price FROM tonnel_sales WHERE gift_name=? AND occurred>=?",
+        (name, cutoff),
+    ).fetchall()
+    scope = result.get("basis_scope", "collection")
+    trait = result.get("basis_trait")
+    if scope == "model":
+        basis_rows = db.execute(
+            "SELECT price FROM tonnel_sales WHERE gift_name=? AND model=? AND occurred>=?",
+            (name, trait, cutoff),
+        ).fetchall()
+        basis_label = f"модель {trait}"
+    elif scope == "backdrop":
+        basis_rows = db.execute(
+            "SELECT price FROM tonnel_sales WHERE gift_name=? AND backdrop=? AND occurred>=?",
+            (name, trait, cutoff),
+        ).fetchall()
+        basis_label = f"фон {trait}"
+    else:
+        basis_rows = collection_rows
+        basis_label = "вся коллекция"
+    prices = []
+    for row in basis_rows:
+        try:
+            prices.append(decimal(row[0], "цена продажи"))
+        except ValueError:
+            continue
+    started = db.execute(
+        "SELECT value FROM tonnel_stream_state WHERE key='sales_started_at'"
+    ).fetchone()
+    history_hours = 0.0
+    if started:
+        try:
+            history_hours = min(24.0, max(0.0, (moment - float(started[0])) / 3600))
+        except (TypeError, ValueError):
+            pass
+    return {
+        "collection_sales_24h": len(collection_rows),
+        "basis_sales_24h": len(prices),
+        "median_sale": median_decimal(prices),
+        "sales_basis_label": basis_label,
+        "sales_history_hours": history_hours,
+    }
+
+
+def apply_sales_evidence(item, result, db, config, now=None):
+    if result is None:
+        return None
+    enriched = dict(result)
+    metrics = sales_metrics(item, enriched, db, now)
+    enriched.update(metrics)
+    basis_sales = metrics["basis_sales_24h"]
+    collection_sales = metrics["collection_sales_24h"]
+    minimum = int(config.get("sales_confirmation_min_count", 3))
+    confirmed = basis_sales >= minimum and metrics["median_sale"] is not None
+    enriched["sales_confirmed"] = confirmed
+
+    if confirmed:
+        resale = min(enriched["resale"], metrics["median_sale"])
+        cost_fraction = decimal(config["tonnel_round_trip_cost_fraction"], "резерв расходов")
+        fixed_cost = decimal(config["fixed_cost_ton"], "фиксированные расходы")
+        profit_ton = resale * (1 - cost_fraction) - fixed_cost - enriched["price"]
+        profit_rub = profit_ton * enriched["rate"]
+        roi = profit_ton / enriched["price"] if enriched["price"] > 0 else Decimal("0")
+        if profit_ton <= 0:
+            return None
+        if profit_rub < decimal(config["min_scenario_profit_rub"], "минимальная прибыль"):
+            return None
+        if roi < decimal(config["min_roi_fraction"], "минимальная доходность"):
+            return None
+        enriched.update({
+            "resale": resale,
+            "profit_ton": profit_ton,
+            "profit_rub": profit_rub,
+            "roi": roi,
+        })
+
+    medium = int(config.get("liquidity_medium_sales_24h", 3))
+    high = int(config.get("liquidity_high_sales_24h", 8))
+    if collection_sales >= high:
+        enriched["liquidity"] = "высокая"
+    elif collection_sales >= medium:
+        enriched["liquidity"] = "средняя"
+    else:
+        enriched["liquidity"] = "низкая"
+
+    strong_sales = int(config.get("strong_signal_min_basis_sales_24h", 5))
+    strong_discount = decimal(config.get("strong_signal_min_discount_fraction", 0.25))
+    strong_roi = decimal(config.get("strong_signal_min_roi_fraction", 0.25))
+    if (
+        confirmed
+        and basis_sales >= strong_sales
+        and collection_sales >= high
+        and enriched["discount"] >= strong_discount
+        and enriched["roi"] >= strong_roi
+    ):
+        enriched["quality"] = "сильный"
+    elif confirmed:
+        enriched["quality"] = "нормальный"
+    else:
+        enriched["quality"] = "рискованный"
+    return enriched
+
+
 def format_alert(item, result, config):
     nft_slug = slug(item)
     nft_link = f"https://t.me/nft/{nft_slug}" if nft_slug else ""
     listing_link = f"https://t.me/tonnel_network_bot/gift?startapp={item['gift_id']}"
-    return (
-        "🔎 Возможный дешёвый лот на Tonnel\n"
-        f"{item.get('name', 'Подарок')} #{item.get('gift_num', '?')}\n"
-        f"Цена: {result['price']:.3f} TON ≈ {result['price'] * result['rate']:.0f} ₽\n"
-        f"Основание: {result.get('basis', 'вся коллекция')}\n"
-        f"Модель: {item.get('model', 'не указана')}\n"
-        f"Фон: {item.get('backdrop', 'не указан')}\n"
-        f"Следующий устойчивый floor: {result['next_floor']:.3f} TON\n"
-        f"Разница: {result['discount'] * 100:.1f}%\n"
-        f"Сценарий быстрой продажи: {result['resale']:.3f} TON\n"
-        f"Расчётный остаток: {result['profit_ton']:.3f} TON ≈ {result['profit_rub']:.0f} ₽\n"
-        f"В расчёте заложен резерв расходов {decimal(config['tonnel_round_trip_cost_fraction']) * 100:.1f}%.\n"
-        "Это сигнал для ручной проверки, прибыль и ликвидность не гарантированы. "
-        "Перед покупкой сверяй цену и доступность в Tonnel.\n"
-        f"ID Tonnel: {item['gift_id']}\n"
-        + (nft_link + "\n" if nft_link else "")
-        + "Открыть объявление: " + listing_link
+    quality = result.get("quality", "рискованный")
+    quality_icons = {"сильный": "🔥", "нормальный": "✅", "рискованный": "⚠️"}
+    sales_count = int(result.get("basis_sales_24h", 0))
+    collection_sales = int(result.get("collection_sales_24h", 0))
+    median_sale = result.get("median_sale")
+    sales_line = (
+        f"Продажи по основанию за 24 ч: {sales_count}"
+        + (f", медиана {median_sale:.3f} TON" if median_sale is not None else "")
     )
+    history_hours = float(result.get("sales_history_hours", 0))
+    history_line = (
+        f"История продаж пока накапливается: {history_hours:.1f} ч\n"
+        if history_hours < 24 else ""
+    )
+    lines = [
+        f"{quality_icons.get(quality, '⚠️')} {quality.capitalize()} оффер на Tonnel",
+        f"{item.get('name', 'Подарок')} #{item.get('gift_num', '?')}",
+        f"Цена: {result['price']:.3f} TON ≈ {result['price'] * result['rate']:.0f} ₽",
+        f"Основание: {result.get('basis', 'вся коллекция')}",
+        f"Модель: {item.get('model', 'не указана')}",
+        f"Фон: {item.get('backdrop', 'не указан')}",
+        f"Следующий устойчивый floor: {result['next_floor']:.3f} TON",
+        f"Разница: {result['discount'] * 100:.1f}%",
+        f"Ликвидность коллекции: {result.get('liquidity', 'низкая')} "
+        f"({collection_sales} продаж за 24 ч)",
+        sales_line,
+    ]
+    if history_line:
+        lines.append(history_line.rstrip())
+    lines.extend([
+        f"Сценарий быстрой продажи: {result['resale']:.3f} TON",
+        f"Расчётный остаток: {result['profit_ton']:.3f} TON ≈ {result['profit_rub']:.0f} ₽",
+        f"В расчёте заложен резерв расходов "
+        f"{decimal(config['tonnel_round_trip_cost_fraction']) * 100:.1f}%.",
+        "Это сигнал для ручной проверки, прибыль и ликвидность не гарантированы. "
+        "Перед покупкой сверяй цену и доступность в Tonnel.",
+        f"ID Tonnel: {item['gift_id']}",
+    ])
+    if nft_link:
+        lines.append(nft_link)
+    lines.append("Открыть объявление: " + listing_link)
+    return "\n".join(lines)
 
 
 def send_if_new_price(item, result, config, secrets, db, send):
@@ -389,6 +588,10 @@ def event_item(event):
     }
 
 
+def collection_enabled(name, config):
+    return bool(config.get("monitor_all_collections")) or name in config["tonnel_collections"]
+
+
 def process_event(event, config, secrets, db, send=True):
     event_id = event.get("eventId") if isinstance(event, dict) else None
     if not isinstance(event_id, str) or not event_id:
@@ -405,21 +608,26 @@ def process_event(event, config, secrets, db, send=True):
         return False
 
     delivered = False
+    record_sale(event, db)
     item = event_item(event)
-    if item is not None and item.get("name") in config["tonnel_collections"]:
+    if item is not None and collection_enabled(item.get("name"), config):
         rate = load_rate(db)
-        floor_book = load_collection_book(db, item["name"], config)
-        variant_books = load_variant_books(
-            db, item["name"], [item], rate, config,
-            [int(config["variant_query_budget_per_cycle"])],
-        )
-        result = best_score(item, floor_book, variant_books, rate, config)
-        if result is not None:
-            db.execute(
-                "CREATE TABLE IF NOT EXISTS tonnel_alerts "
-                "(id TEXT PRIMARY KEY, price TEXT, sent REAL)"
+        if decimal(item.get("price"), "цена") * rate <= decimal(
+            config["max_lot_rub"], "лимит на лот"
+        ):
+            floor_book = load_collection_book(db, item["name"], config)
+            variant_books = load_variant_books(
+                db, item["name"], [item], rate, config,
+                [int(config.get("variant_query_budget_per_event", 1))],
             )
-            delivered = send_if_new_price(item, result, config, secrets, db, send)
+            result = best_score(item, floor_book, variant_books, rate, config)
+            result = apply_sales_evidence(item, result, db, config)
+            if result is not None:
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS tonnel_alerts "
+                    "(id TEXT PRIMARY KEY, price TEXT, sent REAL)"
+                )
+                delivered = send_if_new_price(item, result, config, secrets, db, send)
 
     now = time.time()
     db.execute("INSERT INTO tonnel_events VALUES (?, ?)", (event_id, now))
@@ -461,6 +669,10 @@ def stream_events(config, secrets, db, send=True, duration=14340):
     db.execute(
         "CREATE TABLE IF NOT EXISTS tonnel_stream_state "
         "(key TEXT PRIMARY KEY, value TEXT)"
+    )
+    db.execute(
+        "INSERT OR IGNORE INTO tonnel_stream_state VALUES ('sales_started_at', ?)",
+        (str(time.time()),),
     )
     db.commit()
     deadline = time.monotonic() + max(60, int(duration))
@@ -529,6 +741,7 @@ def run_cycle(config, secrets, db, send=False):
             for item in newest:
                 try:
                     result = best_score(item, floor_book, variant_books, rate, config)
+                    result = apply_sales_evidence(item, result, db, config)
                 except (ValueError, KeyError, TypeError):
                     continue
                 if result is None:
