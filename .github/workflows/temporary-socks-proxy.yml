@@ -1,0 +1,58 @@
+name: Temporary SOCKS Proxy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proxy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Install SOCKS server
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y microsocks
+
+      - name: Start authenticated proxy and tunnel
+        env:
+          PROXY_USER: giftwatch
+        run: |
+          set -euo pipefail
+          PROXY_PASSWORD="$(openssl rand -hex 24)"
+          microsocks -i 127.0.0.1 -p 1080 -u "$PROXY_USER" -P "$PROXY_PASSWORD" >/tmp/microsocks.log 2>&1 &
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes -p 443 -R0:127.0.0.1:1080 tcp@free.pinggy.io >/tmp/pinggy.log 2>&1 &
+
+          for attempt in $(seq 1 60); do
+            ENDPOINT="$(grep -Eo 'tcp://[^[:space:]]+' /tmp/pinggy.log | head -n 1 || true)"
+            if [ -n "$ENDPOINT" ]; then
+              break
+            fi
+            sleep 1
+          done
+
+          if [ -z "${ENDPOINT:-}" ]; then
+            cat /tmp/pinggy.log
+            exit 1
+          fi
+
+          python3 - "$ENDPOINT" "$PROXY_USER" "$PROXY_PASSWORD" <<'PY'
+          import json
+          import sys
+
+          endpoint, username, password = sys.argv[1:]
+          with open("/tmp/proxy-access.json", "w", encoding="utf-8") as handle:
+              json.dump({"endpoint": endpoint, "username": username, "password": password}, handle)
+          PY
+
+      - name: Upload connection details
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-access
+          path: /tmp/proxy-access.json
+          retention-days: 1
+
+      - name: Keep tunnel available
+        run: sleep 3000
