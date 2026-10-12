@@ -2,6 +2,7 @@
   "budget_rub": 5000,
   "reserve_rub": 1000,
   "max_lot_rub": 2000,
+  "min_floor_rub": 1000,
   "min_scenario_profit_rub": 100,
   "min_roi_fraction": 0.15,
   "rub_per_ton": null,

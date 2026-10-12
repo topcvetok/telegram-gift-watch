@@ -252,6 +252,9 @@ def score(item, floor_book, rate, config):
     max_spread = decimal(config["floor_cluster_max_spread_fraction"], "разброс floor")
     if cluster[-1] > next_floor * (1 + max_spread):
         return None
+    min_floor_rub = decimal(config.get("min_floor_rub", 0), "минимальный floor")
+    if next_floor * rate < min_floor_rub:
+        return None
     discount = (next_floor - price) / next_floor
     if discount < decimal(config["min_discount_fraction"], "минимальная скидка"):
         return None
