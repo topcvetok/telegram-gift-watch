@@ -5,6 +5,7 @@ import re
 import sqlite3
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -24,6 +25,12 @@ HEADERS = {
     "origin": "https://market.tonnel.network",
     "referer": "https://market.tonnel.network/",
 }
+
+
+class SourceRateLimited(RuntimeError):
+    def __init__(self, retry_after):
+        self.retry_after = max(60, int(retry_after or 300))
+        super().__init__(f"Tonnel ограничил запросы; повтор через {self.retry_after} сек.")
 
 
 def decimal(value, label="число"):
@@ -49,8 +56,16 @@ def request(method, url, *, body=None, params=None, attempts=3):
             last_status = response.status_code
             if response.status_code == 200:
                 return response.json()
-            if response.status_code not in (403, 429, 500, 502, 503, 504):
+            if response.status_code == 429:
+                try:
+                    retry_after = int(response.headers.get("retry-after", "300"))
+                except (TypeError, ValueError):
+                    retry_after = 300
+                raise SourceRateLimited(retry_after)
+            if response.status_code not in (403, 500, 502, 503, 504):
                 break
+        except SourceRateLimited:
+            raise
         except (OSError, ValueError):
             pass
         if attempt + 1 < attempts:
@@ -58,7 +73,7 @@ def request(method, url, *, body=None, params=None, attempts=3):
     raise RuntimeError(f"Источник временно недоступен (HTTP {last_status or 'network'})")
 
 
-def fetch_collection(name, sort, limit):
+def fetch_collection(name, sort, limit, attributes=None):
     market_filter = {
         "price": {"$exists": True},
         "refunded": {"$ne": True},
@@ -67,6 +82,7 @@ def fetch_collection(name, sort, limit):
         "gift_name": name,
         "asset": "TON",
     }
+    market_filter.update(attributes or {})
     payload = {
         "page": 1,
         "limit": limit,
@@ -81,14 +97,89 @@ def fetch_collection(name, sort, limit):
     return result
 
 
+def load_variant_books(db, collection, items, rate, config, query_budget):
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS tonnel_variant_books ("
+        "scope TEXT, collection TEXT, trait TEXT, payload TEXT, checked REAL, "
+        "PRIMARY KEY (scope, collection, trait))"
+    )
+    budget = decimal(config["max_lot_rub"], "лимит на лот") / rate
+    keys = []
+    seen = set()
+    for item in items:
+        try:
+            if not eligible(item) or decimal(item["price"]) > budget:
+                continue
+        except (KeyError, TypeError, ValueError):
+            continue
+        for scope in ("model", "backdrop"):
+            trait = item.get(scope)
+            key = (scope, trait)
+            if isinstance(trait, str) and trait.strip() and key not in seen:
+                seen.add(key)
+                keys.append(key)
+
+    now = time.time()
+    max_age = float(config["variant_cache_seconds"])
+    books = {}
+    missing = []
+    for scope, trait in keys:
+        row = db.execute(
+            "SELECT payload, checked FROM tonnel_variant_books "
+            "WHERE scope=? AND collection=? AND trait=?",
+            (scope, collection, trait),
+        ).fetchone()
+        if row and now - float(row[1]) <= max_age:
+            try:
+                books[(scope, trait)] = json.loads(row[0])
+                continue
+            except (TypeError, ValueError):
+                pass
+        if query_budget[0] > 0:
+            missing.append((scope, trait))
+            query_budget[0] -= 1
+
+    def fetch(key):
+        scope, trait = key
+        book = fetch_collection(
+            collection,
+            {"price": 1, "gift_id": -1},
+            int(config["variant_floor_limit"]),
+            {scope: trait},
+        )
+        return key, book
+
+    workers = max(1, int(config["variant_workers"]))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(fetch, key): key for key in missing}
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                _, book = future.result()
+            except SourceRateLimited:
+                for pending in futures:
+                    pending.cancel()
+                raise
+            except RuntimeError as exc:
+                print(f"{collection}, {key[0]}: {exc}", file=sys.stderr, flush=True)
+                continue
+            books[key] = book
+            db.execute(
+                "INSERT OR REPLACE INTO tonnel_variant_books VALUES (?, ?, ?, ?, ?)",
+                (key[0], collection, key[1], json.dumps(book, ensure_ascii=False), now),
+            )
+    db.commit()
+    return books
+
+
 def eligible(item):
     return (
         isinstance(item, dict)
         and item.get("status") == "forsale"
         and item.get("asset") == "TON"
-        and item.get("auction") is None
-        and item.get("dutchAuctionData") is None
-        and item.get("premarketData") is None
+        and not item.get("auction")
+        and not item.get("dutchAuctionData")
+        and not item.get("premarketData")
         and item.get("underLoan") is False
         and item.get("gift_id") is not None
         and decimal(item.get("price"), "цена") > 0
@@ -147,6 +238,33 @@ def score(item, floor_book, rate, config):
     }
 
 
+def best_score(item, collection_book, variant_books, rate, config):
+    results = []
+    collection_result = score(item, collection_book, rate, config)
+    if collection_result is not None:
+        collection_result["basis"] = "вся коллекция"
+        results.append(collection_result)
+
+    variant_config = dict(config)
+    variant_config["min_comparables"] = config["variant_min_comparables"]
+    variant_config["floor_cluster_max_spread_fraction"] = config[
+        "variant_floor_cluster_max_spread_fraction"
+    ]
+    labels = {"model": "модель", "backdrop": "фон"}
+    for scope, label in labels.items():
+        trait = item.get(scope)
+        book = variant_books.get((scope, trait))
+        if not book:
+            continue
+        result = score(item, book, rate, variant_config)
+        if result is not None:
+            result["basis"] = f"{label}: {trait}"
+            results.append(result)
+    if not results:
+        return None
+    return max(results, key=lambda result: (result["profit_rub"], result["discount"]))
+
+
 def slug(item):
     base = re.sub(r"[^A-Za-z0-9]", "", str(item.get("name", ""))).lower()
     number = item.get("gift_num")
@@ -161,6 +279,9 @@ def format_alert(item, result, config):
         "🔎 Возможный дешёвый лот на Tonnel\n"
         f"{item.get('name', 'Подарок')} #{item.get('gift_num', '?')}\n"
         f"Цена: {result['price']:.3f} TON ≈ {result['price'] * result['rate']:.0f} ₽\n"
+        f"Основание: {result.get('basis', 'вся коллекция')}\n"
+        f"Модель: {item.get('model', 'не указана')}\n"
+        f"Фон: {item.get('backdrop', 'не указан')}\n"
         f"Следующий устойчивый floor: {result['next_floor']:.3f} TON\n"
         f"Разница: {result['discount'] * 100:.1f}%\n"
         f"Сценарий быстрой продажи: {result['resale']:.3f} TON\n"
@@ -199,6 +320,7 @@ def run_cycle(config, secrets, db, send=False):
     rate = load_rate(db)
     db.execute("CREATE TABLE IF NOT EXISTS tonnel_alerts (id TEXT PRIMARY KEY, price TEXT, sent REAL)")
     total = candidates = delivered = 0
+    variant_query_budget = [int(config["variant_query_budget_per_cycle"])]
     for index, collection in enumerate(config["tonnel_collections"]):
         try:
             floor_book = fetch_collection(collection, {"price": 1, "gift_id": -1}, int(config["floor_limit"]))
@@ -208,10 +330,13 @@ def run_cycle(config, secrets, db, send=False):
                 {"message_post_time": -1, "gift_id": -1},
                 int(config["latest_limit"]),
             )
+            variant_books = load_variant_books(
+                db, collection, newest, rate, config, variant_query_budget
+            )
             total += len(newest)
             for item in newest:
                 try:
-                    result = score(item, floor_book, rate, config)
+                    result = best_score(item, floor_book, variant_books, rate, config)
                 except (ValueError, KeyError, TypeError):
                     continue
                 if result is None:
@@ -232,6 +357,8 @@ def run_cycle(config, secrets, db, send=False):
                     delivered += 1
                 else:
                     print(text + "\n")
+        except SourceRateLimited:
+            raise
         except RuntimeError as exc:
             print(f"{collection}: {exc}", file=sys.stderr, flush=True)
         if index + 1 < len(config["tonnel_collections"]):
@@ -254,13 +381,17 @@ def main():
     interval = max(60, int(config["poll_seconds"]))
     with sqlite3.connect(ROOT / "state.sqlite3") as db:
         while True:
+            delay = interval
             try:
                 run_cycle(config, secrets, db, args.send)
+            except SourceRateLimited as exc:
+                delay = max(interval, min(exc.retry_after, 300))
+                print(f"Цикл приостановлен: {exc}", file=sys.stderr, flush=True)
             except RuntimeError as exc:
                 print(f"Цикл пропущен: {exc}", file=sys.stderr, flush=True)
             if args.once:
                 return
-            time.sleep(interval)
+            time.sleep(delay)
 
 
 if __name__ == "__main__":
