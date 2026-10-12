@@ -8,6 +8,10 @@
   "rub_per_ton": null,
   "rub_rate_checked_at": null,
   "poll_seconds": 120,
+  "mrkt_poll_seconds": 5,
+  "mrkt_feed_limit": 20,
+  "mrkt_book_cache_seconds": 20,
+  "mrkt_round_trip_cost_fraction": 0.0196078431,
   "max_pages": 2,
   "monitor_all_collections": true,
   "tonnel_collections": [

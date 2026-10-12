@@ -34,7 +34,9 @@ jobs:
       - name: Restore monitor state
         uses: actions/cache/restore@v4
         with:
-          path: state.sqlite3
+          path: |
+            state.sqlite3
+            mrkt_state.sqlite3
           key: gift-watch-state-${{ github.run_id }}
           restore-keys: gift-watch-state-
 
@@ -42,6 +44,7 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+          MRKT_TOKEN: ${{ secrets.MRKT_TOKEN }}
         run: |
           python - <<'PY'
           import json
@@ -55,6 +58,7 @@ jobs:
           Path("secrets.json").write_text(json.dumps({
               "bot_token": token,
               "chat_id": chat_id,
+              "mrkt_token": os.environ.get("MRKT_TOKEN", ""),
           }))
           Path("secrets.json").chmod(0o600)
           PY
@@ -65,13 +69,19 @@ jobs:
       - name: Listen for new listings in real time
         env:
           STREAM_SECONDS: ${{ inputs.stream_seconds || '3300' }}
-        run: python -u tonnel_watch.py --send --stream-seconds "${STREAM_SECONDS}"
+        run: |
+          python -u mrkt_watch.py --send --duration "${STREAM_SECONDS}" &
+          mrkt_pid=$!
+          python -u tonnel_watch.py --send --stream-seconds "${STREAM_SECONDS}"
+          wait "${mrkt_pid}"
 
       - name: Save monitor state
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: state.sqlite3
+          path: |
+            state.sqlite3
+            mrkt_state.sqlite3
           key: gift-watch-state-${{ github.run_id }}
 
       - name: Remove older state caches
