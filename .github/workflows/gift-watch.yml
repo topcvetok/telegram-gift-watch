@@ -1,0 +1,76 @@
+name: Gift Watch
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: gift-watch-production
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Restore monitor state
+        uses: actions/cache/restore@v4
+        with:
+          path: state.sqlite3
+          key: gift-watch-state-${{ github.run_id }}
+          restore-keys: gift-watch-state-
+
+      - name: Create runtime secrets file
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          token = os.environ.get("BOT_TOKEN", "")
+          chat_id = os.environ.get("CHAT_ID", "")
+          if not token or not chat_id:
+              raise SystemExit("BOT_TOKEN or CHAT_ID is missing")
+          Path("secrets.json").write_text(json.dumps({
+              "bot_token": token,
+              "chat_id": chat_id,
+          }))
+          Path("secrets.json").chmod(0o600)
+          PY
+
+      - name: Check listings and send alerts
+        run: python -u tonnel_watch.py --once --send
+
+      - name: Save monitor state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state.sqlite3
+          key: gift-watch-state-${{ github.run_id }}
+
+      - name: Remove older state caches
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current="gift-watch-state-${GITHUB_RUN_ID}"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/caches" --paginate \
+            --jq ".actions_caches[] | select(.key != \"${current}\") | select(.key | startswith(\"gift-watch-state-\")) | .id" |
+          while read -r cache_id; do
+            [ -z "${cache_id}" ] || gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${cache_id}"
+          done
