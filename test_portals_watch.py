@@ -177,6 +177,18 @@ class PortalsTests(unittest.TestCase):
         self.assertIn("оффер на Portals", message)
         self.assertIn("Tonnel — 11.000 TON", message)
 
+    def test_fail_fast_run_reports_unavailable_portals(self):
+        db = sqlite3.connect(":memory:")
+        session = Mock()
+        session.__enter__ = Mock(return_value=session)
+        session.__exit__ = Mock(return_value=False)
+        with patch.object(watch.requests, "Session", return_value=session), \
+                patch.object(watch, "run_cycle", side_effect=RuntimeError("offline")):
+            with self.assertRaisesRegex(RuntimeError, "offline"):
+                watch.run(
+                    self.config, {}, db, send=False, duration=1, fail_fast=True
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

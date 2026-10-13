@@ -430,7 +430,7 @@ def run_cycle(config, secrets, db, session, token="", send=True):
     return delivered
 
 
-def run(config, secrets, db, *, send=True, duration=3300):
+def run(config, secrets, db, *, send=True, duration=3300, fail_fast=False):
     token = str(secrets.get("portals_token", "")).strip()
     deadline = time.monotonic() + max(1, int(duration))
     interval = max(3, int(config.get("portals_poll_seconds", 5)))
@@ -444,9 +444,13 @@ def run(config, secrets, db, *, send=True, duration=3300):
             try:
                 delivered += run_cycle(config, secrets, db, session, token, send)
             except PortalsRateLimited as exc:
+                if fail_fast:
+                    raise
                 delay = min(exc.retry_after, 300)
                 print(str(exc), file=sys.stderr, flush=True)
             except RuntimeError as exc:
+                if fail_fast:
+                    raise
                 print(f"Portals: цикл пропущен: {exc}", file=sys.stderr, flush=True)
             time.sleep(min(delay, max(0, deadline - time.monotonic())))
     return delivered
@@ -464,13 +468,13 @@ def main():
     with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
         db.execute("PRAGMA busy_timeout=30000")
         db.execute("PRAGMA journal_mode=WAL")
-        run(config, secrets, db, send=args.send, duration=duration)
+        run(config, secrets, db, send=args.send, duration=duration, fail_fast=args.once)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
+    except (ValueError, KeyError, OSError, RuntimeError, json.JSONDecodeError) as exc:
         print(f"Не удалось запустить Portals: {exc}", file=sys.stderr)
         raise SystemExit(1)
     except KeyboardInterrupt:
