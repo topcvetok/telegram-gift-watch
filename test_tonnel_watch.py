@@ -261,6 +261,32 @@ class TonnelScoringTests(unittest.TestCase):
         self.assertEqual(metrics["median_sale"], Decimal("7.0"))
         self.assertAlmostEqual(metrics["sales_history_hours"], 2.0)
 
+    def test_sales_metrics_return_three_newest_valid_sales(self):
+        with sqlite3.connect(":memory:") as db:
+            db.execute(
+                "CREATE TABLE tonnel_sales (event_id TEXT PRIMARY KEY, gift_id TEXT, "
+                "gift_name TEXT, model TEXT, backdrop TEXT, symbol TEXT, price TEXT, "
+                "source TEXT, occurred REAL)"
+            )
+            rows = [
+                ("newest", "1", "Evil Eye", "Watcher", "Black", "Moon", "14", "portals", 900),
+                ("broken", "2", "Evil Eye", "Watcher", "Black", "Moon", "bad", "tonnel", 800),
+                ("second", "3", "Evil Eye", "Watcher", "Black", "Moon", "13", "tonnel", 700),
+                ("third", "4", "Evil Eye", "Watcher", "Black", "Moon", "12", "tonnel", 600),
+                ("oldest", "5", "Evil Eye", "Watcher", "Black", "Moon", "11", "tonnel", 500),
+            ]
+            db.executemany(
+                "INSERT INTO tonnel_sales VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
+            )
+            metrics = watch.sales_metrics(
+                {"name": "Evil Eye"}, {"basis_scope": "collection"}, db, now=1000
+            )
+        self.assertEqual(
+            [(sale["source"], sale["price"]) for sale in metrics["recent_sales"]],
+            [("portals", Decimal("14")), ("tonnel", Decimal("13")),
+             ("tonnel", Decimal("12"))],
+        )
+
     def test_real_sales_can_reject_apparent_profit(self):
         now = watch.time.time()
         item = gift(1, 5.0)

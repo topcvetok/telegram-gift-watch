@@ -144,6 +144,7 @@ def telegram(secrets, text):
     result = request_json(
         f"https://api.telegram.org/bot{secrets['bot_token']}/sendMessage",
         {"chat_id": secrets["chat_id"], "text": text,
+         "parse_mode": "HTML",
          "link_preview_options": {"is_disabled": True}})
     if not isinstance(result, dict) or result.get("ok") is not True:
         raise RuntimeError("Telegram не подтвердил доставку")

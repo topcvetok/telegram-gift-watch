@@ -16,6 +16,7 @@ except ImportError:
     raise SystemExit("Не установлен curl_cffi. Запусти start_watch.command.")
 
 from bot import ROOT, telegram
+from alert_format import format_market_alert
 
 TONNEL_URL = "https://gifts2.tonnel.network/api/pageGifts"
 EVENTS_URL = "https://gifts.coffin.meme/api/marketplace/events"
@@ -361,7 +362,7 @@ def record_sale(event, db):
         (
             event_id, str(gift.get("gift_id", "")), name,
             gift.get("model"), gift.get("backdrop"), gift.get("symbol"),
-            str(price), str(data.get("source", "")), occurred,
+            str(price), "tonnel", occurred,
         ),
     )
     db.execute("DELETE FROM tonnel_sales WHERE occurred < ?", (time.time() - 2 * 86400,))
@@ -393,20 +394,23 @@ def sales_metrics(item, result, db, now=None):
     cutoff = moment - 86400
     name = item.get("name")
     collection_rows = db.execute(
-        "SELECT price FROM tonnel_sales WHERE gift_name=? AND occurred>=?",
+        "SELECT price, source, occurred FROM tonnel_sales WHERE gift_name=? AND occurred>=? "
+        "ORDER BY occurred DESC",
         (name, cutoff),
     ).fetchall()
     scope = result.get("basis_scope", "collection")
     trait = result.get("basis_trait")
     if scope == "model":
         basis_rows = db.execute(
-            "SELECT price FROM tonnel_sales WHERE gift_name=? AND model=? AND occurred>=?",
+            "SELECT price, source, occurred FROM tonnel_sales "
+            "WHERE gift_name=? AND model=? AND occurred>=? ORDER BY occurred DESC",
             (name, trait, cutoff),
         ).fetchall()
         basis_label = f"модель {trait}"
     elif scope == "backdrop":
         basis_rows = db.execute(
-            "SELECT price FROM tonnel_sales WHERE gift_name=? AND backdrop=? AND occurred>=?",
+            "SELECT price, source, occurred FROM tonnel_sales "
+            "WHERE gift_name=? AND backdrop=? AND occurred>=? ORDER BY occurred DESC",
             (name, trait, cutoff),
         ).fetchall()
         basis_label = f"фон {trait}"
@@ -419,6 +423,17 @@ def sales_metrics(item, result, db, now=None):
             prices.append(decimal(row[0], "цена продажи"))
         except ValueError:
             continue
+    recent_sales = []
+    for row in basis_rows:
+        try:
+            recent_sales.append({
+                "price": decimal(row[0], "цена продажи"),
+                "source": str(row[1] or "tonnel").casefold(),
+            })
+        except ValueError:
+            continue
+        if len(recent_sales) == 3:
+            break
     started = db.execute(
         "SELECT value FROM tonnel_stream_state WHERE key='sales_started_at'"
     ).fetchone()
@@ -434,6 +449,7 @@ def sales_metrics(item, result, db, now=None):
         "median_sale": median_decimal(prices),
         "sales_basis_label": basis_label,
         "sales_history_hours": history_hours,
+        "recent_sales": recent_sales,
     }
 
 
@@ -500,48 +516,17 @@ def format_alert(item, result, config):
     nft_slug = slug(item)
     nft_link = f"https://t.me/nft/{nft_slug}" if nft_slug else ""
     listing_link = f"https://t.me/tonnel_network_bot/gift?startapp={item['gift_id']}"
-    quality = result.get("quality", "рискованный")
-    quality_icons = {"сильный": "🔥", "нормальный": "✅", "рискованный": "⚠️"}
-    sales_count = int(result.get("basis_sales_24h", 0))
-    collection_sales = int(result.get("collection_sales_24h", 0))
-    median_sale = result.get("median_sale")
-    sales_line = (
-        f"Продажи по основанию за 24 ч: {sales_count}"
-        + (f", медиана {median_sale:.3f} TON" if median_sale is not None else "")
+    return format_market_alert(
+        item, result, market="Tonnel", listing_link=listing_link, gift_link=nft_link
     )
-    history_hours = float(result.get("sales_history_hours", 0))
-    history_line = (
-        f"История продаж пока накапливается: {history_hours:.1f} ч\n"
-        if history_hours < 24 else ""
-    )
-    lines = [
-        f"{quality_icons.get(quality, '⚠️')} {quality.capitalize()} оффер на Tonnel",
-        f"{item.get('name', 'Подарок')} #{item.get('gift_num', '?')}",
-        f"Цена: {result['price']:.3f} TON ≈ {result['price'] * result['rate']:.0f} ₽",
-        f"Основание: {result.get('basis', 'вся коллекция')}",
-        f"Модель: {item.get('model', 'не указана')}",
-        f"Фон: {item.get('backdrop', 'не указан')}",
-        f"Следующий устойчивый floor: {result['next_floor']:.3f} TON",
-        f"Разница: {result['discount'] * 100:.1f}%",
-        f"Ликвидность коллекции: {result.get('liquidity', 'низкая')} "
-        f"({collection_sales} продаж за 24 ч)",
-        sales_line,
-    ]
-    if history_line:
-        lines.append(history_line.rstrip())
-    lines.extend([
-        f"Сценарий быстрой продажи: {result['resale']:.3f} TON",
-        f"Расчётный остаток: {result['profit_ton']:.3f} TON ≈ {result['profit_rub']:.0f} ₽",
-        f"В расчёте заложен резерв расходов "
-        f"{decimal(config['tonnel_round_trip_cost_fraction']) * 100:.1f}%.",
-        "Это сигнал для ручной проверки, прибыль и ликвидность не гарантированы. "
-        "Перед покупкой сверяй цену и доступность в Tonnel.",
-        f"ID Tonnel: {item['gift_id']}",
-    ])
-    if nft_link:
-        lines.append(nft_link)
-    lines.append("Открыть объявление: " + listing_link)
-    return "\n".join(lines)
+
+
+def attach_cross_market_floors(item, result, config, secrets, db):
+    if result is None or result.get("next_floor") is None:
+        return result
+    # Import lazily: Portals reuses the scoring functions from this module.
+    from portals_watch import add_portals_floor
+    return add_portals_floor(item, result, config, secrets, db)
 
 
 def send_if_new_price(item, result, config, secrets, db, send):
@@ -622,6 +607,7 @@ def process_event(event, config, secrets, db, send=True):
             )
             result = best_score(item, floor_book, variant_books, rate, config)
             result = apply_sales_evidence(item, result, db, config)
+            result = attach_cross_market_floors(item, result, config, secrets, db)
             if result is not None:
                 db.execute(
                     "CREATE TABLE IF NOT EXISTS tonnel_alerts "
@@ -742,6 +728,7 @@ def run_cycle(config, secrets, db, send=False):
                 try:
                     result = best_score(item, floor_book, variant_books, rate, config)
                     result = apply_sales_evidence(item, result, db, config)
+                    result = attach_cross_market_floors(item, result, config, secrets, db)
                 except (ValueError, KeyError, TypeError):
                     continue
                 if result is None:
@@ -775,7 +762,9 @@ def main():
     config = json.loads((ROOT / "config.json").read_text())
     secrets = json.loads((ROOT / "secrets.json").read_text())
     interval = max(60, int(config["poll_seconds"]))
-    with sqlite3.connect(ROOT / "state.sqlite3") as db:
+    with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
+        db.execute("PRAGMA busy_timeout=30000")
+        db.execute("PRAGMA journal_mode=WAL")
         if args.stream_seconds:
             stream_events(config, secrets, db, args.send, args.stream_seconds)
             return
