@@ -538,7 +538,9 @@ def send_if_new_price(item, result, config, secrets, db, send):
     if not send:
         print(text + "\n")
         return False
-    telegram(secrets, text)
+    nft_slug = slug(item)
+    preview_url = f"https://t.me/nft/{nft_slug}" if nft_slug else None
+    telegram(secrets, text, preview_url=preview_url)
     db.execute(
         "INSERT OR REPLACE INTO tonnel_alerts VALUES (?, ?, ?)",
         (key, str(result["price"]), time.time()),

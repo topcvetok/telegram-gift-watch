@@ -132,7 +132,7 @@ class PortalsTests(unittest.TestCase):
         self.assertIn("Tonnel — 11.500 TON", text)
         self.assertIn("История продаж:", text)
         self.assertIn("https://t.me/nft/evileye-42", text)
-        self.assertIn("https://t.me/portals/market?startapp=p1", text)
+        self.assertIn("https://t.me/portals/market?startapp=gift_p1", text)
 
     def test_same_or_higher_price_is_not_sent_twice(self):
         db = sqlite3.connect(":memory:")
@@ -154,6 +154,10 @@ class PortalsTests(unittest.TestCase):
                 item, dict(result, price=Decimal("7")), self.config, {}, db, True
             ))
         self.assertEqual(send.call_count, 2)
+        self.assertEqual(
+            send.call_args.kwargs["preview_url"],
+            "https://t.me/nft/evileye-42",
+        )
 
     def test_listing_is_scored_with_model_and_allowed_backdrop(self):
         db = sqlite3.connect(":memory:")

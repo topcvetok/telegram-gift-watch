@@ -67,6 +67,22 @@ class SignalTests(unittest.TestCase):
         with patch.object(bot, "request_json", side_effect=AssertionError("network forbidden")), patch("builtins.print"):
             bot.demo()
 
+    def test_telegram_enables_large_gift_preview(self):
+        preview = "https://t.me/nft/PlushPepe-1098"
+        with patch.object(bot, "request_json", return_value={"ok": True}) as request:
+            bot.telegram(
+                {"bot_token": "1:test", "chat_id": "42"},
+                "offer",
+                preview_url=preview,
+            )
+        payload = request.call_args.args[1]
+        self.assertEqual(payload["link_preview_options"], {
+            "is_disabled": False,
+            "url": preview,
+            "prefer_large_media": True,
+            "show_above_text": True,
+        })
+
 
 if __name__ == "__main__":
     unittest.main()

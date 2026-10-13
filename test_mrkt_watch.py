@@ -90,7 +90,7 @@ class MrktTests(unittest.TestCase):
         }
         text = watch.format_alert(item, result, self.config)
         self.assertIn("оффер на MRKT", text)
-        self.assertIn("https://t.me/mrkt/app?startapp=g1", text)
+        self.assertIn("https://t.me/mrkt/app?startapp=giftg1", text)
 
     def test_sale_is_recorded_once(self):
         db = sqlite3.connect(":memory:")
@@ -124,6 +124,10 @@ class MrktTests(unittest.TestCase):
                 item, dict(result, price=Decimal("9")), self.config, {}, db, True
             ))
         self.assertEqual(send.call_count, 2)
+        self.assertEqual(
+            send.call_args.kwargs["preview_url"],
+            "https://t.me/nft/evileye-42",
+        )
 
     def test_fetch_book_maps_api_response(self):
         session = Mock()
@@ -153,6 +157,7 @@ class MrktTests(unittest.TestCase):
 
         with patch.object(watch, "load_rate", return_value=Decimal("100")), \
                 patch.object(watch, "cached_book", side_effect=book), \
+                patch.object(watch, "attach_cross_market_floors", side_effect=lambda *args: args[1]), \
                 patch.object(watch, "telegram") as send:
             self.assertTrue(watch.process_event(
                 event, self.config, {}, db, Mock(), "token", send=True
@@ -162,11 +167,20 @@ class MrktTests(unittest.TestCase):
             ))
         self.assertEqual(send.call_count, 1)
         self.assertIn("оффер на MRKT", send.call_args.args[1])
+        self.assertIn(
+            "https://t.me/mrkt/app?startapp=feedlisting1",
+            send.call_args.args[1],
+        )
 
     def test_missing_token_does_not_break_tonnel_process(self):
         db = sqlite3.connect(":memory:")
         with patch("builtins.print"):
             self.assertEqual(watch.run(self.config, {}, db, duration=1), 0)
+
+    def test_fail_fast_requires_token(self):
+        db = sqlite3.connect(":memory:")
+        with self.assertRaisesRegex(RuntimeError, "MRKT_TOKEN"):
+            watch.run(self.config, {}, db, duration=1, fail_fast=True)
 
 
 if __name__ == "__main__":

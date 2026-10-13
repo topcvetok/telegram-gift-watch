@@ -14,6 +14,7 @@ except ImportError:
     raise SystemExit("Не установлен curl_cffi. Запусти start_watch.command.")
 
 from bot import ROOT, telegram
+from alert_format import format_market_alert
 from tonnel_watch import apply_sales_evidence, best_score, decimal, load_rate, slug
 
 API_URL = "https://api.tgmrkt.io/api/v1"
@@ -166,6 +167,7 @@ def mrkt_item(raw, event=None):
         "dutchAuctionData": None,
         "premarketData": None,
         "underLoan": False,
+        "listing_event_id": str(event.get("id")) if isinstance(event, dict) and event.get("id") else None,
     }
 
 
@@ -252,40 +254,34 @@ def record_sale(event, db):
 def format_alert(item, result, config):
     nft_slug = slug(item)
     nft_link = f"https://t.me/nft/{nft_slug}" if nft_slug else ""
-    listing_link = f"https://t.me/mrkt/app?startapp={item['gift_id']}"
-    quality = result.get("quality", "рискованный")
-    icons = {"сильный": "🔥", "нормальный": "✅", "рискованный": "⚠️"}
-    sales_count = int(result.get("basis_sales_24h", 0))
-    collection_sales = int(result.get("collection_sales_24h", 0))
-    median_sale = result.get("median_sale")
-    sales_line = (
-        f"Продажи по основанию за 24 ч: {sales_count}"
-        + (f", медиана {median_sale:.3f} TON" if median_sale is not None else "")
+    event_id = item.get("listing_event_id")
+    if event_id:
+        start_param = "feed" + str(event_id).replace("-", "")
+    else:
+        start_param = "gift" + str(item["gift_id"]).replace("-", "")
+    listing_link = f"https://t.me/mrkt/app?startapp={start_param}"
+    return format_market_alert(
+        item, result, market="MRKT", listing_link=listing_link, gift_link=nft_link
     )
-    lines = [
-        f"{icons.get(quality, '⚠️')} {quality.capitalize()} оффер на MRKT",
-        f"{item.get('name', 'Подарок')} #{item.get('gift_num', '?')}",
-        f"Цена покупателя: {result['price']:.3f} TON ≈ {result['price'] * result['rate']:.0f} ₽",
-        f"Основание: {result.get('basis', 'вся коллекция')}",
-        f"Модель: {item.get('model') or 'не указана'}",
-        f"Фон: {item.get('backdrop') or 'не указан'}",
-        f"Следующий устойчивый floor: {result['next_floor']:.3f} TON",
-        f"Разница: {result['discount'] * 100:.1f}%",
-        f"Ликвидность коллекции: {result.get('liquidity', 'низкая')} "
-        f"({collection_sales} продаж за 24 ч)",
-        sales_line,
-        f"Сценарий быстрой продажи: {result['resale']:.3f} TON",
-        f"Расчётный остаток: {result['profit_ton']:.3f} TON ≈ {result['profit_rub']:.0f} ₽",
-        f"В расчёте заложена надбавка MRKT около "
-        f"{decimal(config['mrkt_round_trip_cost_fraction']) * 100:.1f}%.",
-        "Это сигнал для ручной проверки, прибыль и ликвидность не гарантированы. "
-        "Перед покупкой сверяй цену и доступность в MRKT.",
-        f"ID MRKT: {item['gift_id']}",
-    ]
-    if nft_link:
-        lines.append(nft_link)
-    lines.append("Открыть объявление: " + listing_link)
-    return "\n".join(lines)
+
+
+def attach_cross_market_floors(item, result, config, secrets, db):
+    if result is None:
+        return None
+    from portals_watch import add_portals_floor, tonnel_comparable_floor
+
+    enriched = add_portals_floor(
+        item, result, config, secrets, db, base_market="MRKT"
+    )
+    try:
+        floor = tonnel_comparable_floor(item, enriched, config)
+        if floor is not None:
+            enriched.setdefault("market_floors", []).insert(
+                0, {"market": "Tonnel", "floor": floor}
+            )
+    except RuntimeError:
+        pass
+    return enriched
 
 
 def send_if_new_price(item, result, config, secrets, db, send=True):
@@ -301,7 +297,9 @@ def send_if_new_price(item, result, config, secrets, db, send=True):
     if not send:
         print(text + "\n")
         return False
-    telegram(secrets, text)
+    nft_slug = slug(item)
+    preview_url = f"https://t.me/nft/{nft_slug}" if nft_slug else None
+    telegram(secrets, text, preview_url=preview_url)
     db.execute(
         "INSERT OR REPLACE INTO mrkt_alerts VALUES (?, ?, ?)",
         (key, str(result["price"]), time.time()),
@@ -346,6 +344,7 @@ def process_event(event, config, secrets, db, session, token, send=True):
                 score_config = mrkt_scoring_config(config)
                 result = best_score(item, collection_book, variant_books, rate, score_config)
                 result = apply_sales_evidence(item, result, db, score_config)
+                result = attach_cross_market_floors(item, result, config, secrets, db)
                 if result is not None:
                     delivered = send_if_new_price(item, result, config, secrets, db, send)
     now = time.time()
@@ -372,9 +371,11 @@ def run_cycle(config, secrets, db, session, token, send=True):
     return delivered
 
 
-def run(config, secrets, db, *, send=True, duration=3300):
+def run(config, secrets, db, *, send=True, duration=3300, fail_fast=False):
     token = str(secrets.get("mrkt_token", "")).strip()
     if not token:
+        if fail_fast:
+            raise RuntimeError("MRKT_TOKEN не настроен")
         print("MRKT: токен ещё не настроен; монитор Tonnel продолжает работу.", flush=True)
         return 0
     db.execute(
@@ -395,12 +396,18 @@ def run(config, secrets, db, *, send=True, duration=3300):
             try:
                 delivered += run_cycle(config, secrets, db, session, token, send)
             except MrktRateLimited as exc:
+                if fail_fast:
+                    raise RuntimeError(str(exc)) from exc
                 delay = min(exc.retry_after, 300)
                 print(str(exc), file=sys.stderr, flush=True)
             except MrktAuthError as exc:
+                if fail_fast:
+                    raise RuntimeError(str(exc)) from exc
                 print(f"MRKT остановлен: {exc}", file=sys.stderr, flush=True)
                 return delivered
             except RuntimeError as exc:
+                if fail_fast:
+                    raise
                 print(f"MRKT: цикл пропущен: {exc}", file=sys.stderr, flush=True)
             time.sleep(min(delay, max(0, deadline - time.monotonic())))
     return delivered
@@ -411,12 +418,18 @@ def main():
     parser.add_argument("--send", action="store_true")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--duration", type=int, default=3300)
+    parser.add_argument("--fail-fast", action="store_true")
     args = parser.parse_args()
     config = json.loads((ROOT / "config.json").read_text())
     secrets = json.loads((ROOT / "secrets.json").read_text())
     duration = 1 if args.once else args.duration
-    with sqlite3.connect(ROOT / "mrkt_state.sqlite3") as db:
-        run(config, secrets, db, send=args.send, duration=duration)
+    with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA busy_timeout=30000")
+        run(
+            config, secrets, db, send=args.send, duration=duration,
+            fail_fast=args.fail_fast,
+        )
 
 
 if __name__ == "__main__":

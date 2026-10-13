@@ -210,6 +210,10 @@ class TonnelScoringTests(unittest.TestCase):
             for _ in results:
                 watch.run_cycle(config, {}, db, send=True)
             self.assertEqual(send.call_count, 2)
+            self.assertEqual(
+                send.call_args.kwargs["preview_url"],
+                "https://t.me/nft/chillflame-1",
+            )
             saved = db.execute("SELECT price FROM tonnel_alerts WHERE id='1'").fetchone()
             self.assertEqual(saved[0], "2.4")
 

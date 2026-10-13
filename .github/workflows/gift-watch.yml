@@ -43,6 +43,7 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+          MRKT_TOKEN: ${{ secrets.MRKT_TOKEN }}
         run: |
           python - <<'PY'
           import json
@@ -56,26 +57,42 @@ jobs:
           Path("secrets.json").write_text(json.dumps({
               "bot_token": token,
               "chat_id": chat_id,
+              "mrkt_token": os.environ.get("MRKT_TOKEN", ""),
           }))
           Path("secrets.json").chmod(0o600)
           PY
 
       - name: Check current listings
+        env:
+          MRKT_TOKEN: ${{ secrets.MRKT_TOKEN }}
         run: |
           python -u tonnel_watch.py --once --send
           python -u portals_watch.py --once --send
+          if [ -n "${MRKT_TOKEN}" ]; then
+            python -u mrkt_watch.py --once --send --fail-fast
+          fi
 
       - name: Listen for new listings in real time
         env:
           STREAM_SECONDS: ${{ inputs.stream_seconds || '3300' }}
+          MRKT_TOKEN: ${{ secrets.MRKT_TOKEN }}
         run: |
           set -u
+          mrkt_pid=""
           python -u portals_watch.py --send --duration "${STREAM_SECONDS}" &
           portals_pid=$!
           python -u tonnel_watch.py --send --stream-seconds "${STREAM_SECONDS}" &
           tonnel_pid=$!
+          if [ -n "${MRKT_TOKEN}" ]; then
+            python -u mrkt_watch.py --send --duration "${STREAM_SECONDS}" &
+            mrkt_pid=$!
+          fi
           status=0
           wait -n "${portals_pid}" "${tonnel_pid}" || status=$?
+          if [ -n "${mrkt_pid}" ]; then
+            kill "${mrkt_pid}" 2>/dev/null || true
+            wait "${mrkt_pid}" 2>/dev/null || true
+          fi
           kill "${portals_pid}" "${tonnel_pid}" 2>/dev/null || true
           wait "${portals_pid}" "${tonnel_pid}" 2>/dev/null || true
           exit "${status}"

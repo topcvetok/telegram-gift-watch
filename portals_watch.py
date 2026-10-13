@@ -276,12 +276,12 @@ def basis_book(db, session, token, item, result, config):
     return book, minimum, spread
 
 
-def add_portals_floor(item, result, config, secrets, db):
-    """Add a comparable Portals floor without ever blocking a Tonnel alert."""
+def add_portals_floor(item, result, config, secrets, db, *, base_market="Tonnel"):
+    """Add a comparable Portals floor without ever blocking the source alert."""
     if result is None:
         return None
     enriched = dict(result)
-    floors = [{"market": "Tonnel", "floor": enriched.get("next_floor")}]
+    floors = [{"market": base_market, "floor": enriched.get("next_floor")}]
     if enriched.get("next_floor") is None:
         enriched["market_floors"] = []
         return enriched
@@ -332,7 +332,7 @@ def portals_scoring_config(config):
 def format_alert(item, result, config):
     gift_slug = slug(item)
     gift_link = f"https://t.me/nft/{gift_slug}" if gift_slug else ""
-    listing_link = APP_URL + "?startapp=" + str(item["gift_id"])
+    listing_link = APP_URL + "?startapp=gift_" + str(item["gift_id"])
     return format_market_alert(
         item, result, market="Portals", listing_link=listing_link, gift_link=gift_link
     )
@@ -351,7 +351,9 @@ def send_if_new_price(item, result, config, secrets, db, send=True):
     if not send:
         print(text + "\n")
         return False
-    telegram(secrets, text)
+    gift_slug = slug(item)
+    preview_url = f"https://t.me/nft/{gift_slug}" if gift_slug else None
+    telegram(secrets, text, preview_url=preview_url)
     db.execute(
         "INSERT OR REPLACE INTO portals_alerts VALUES (?, ?, ?)",
         (key, str(result["price"]), time.time()),
