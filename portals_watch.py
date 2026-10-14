@@ -16,6 +16,11 @@ except ImportError:
 
 from alert_format import format_market_alert
 from bot import ROOT, telegram
+from market_data import (
+    apply_activity_evidence,
+    complete_market_floors,
+    record_market_activity,
+)
 from tonnel_watch import (
     allowed_backdrop,
     apply_sales_evidence,
@@ -193,6 +198,50 @@ def resolve_collection_id(db, session, token, collection):
     return collection_id
 
 
+def collection_stats(db, session, token, collection, config):
+    """Return official Portals collection activity, with a short local cache."""
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS portals_collection_stats ("
+        "name TEXT PRIMARY KEY, payload TEXT, checked REAL)"
+    )
+    row = db.execute(
+        "SELECT payload, checked FROM portals_collection_stats WHERE name=?", (collection,)
+    ).fetchone()
+    ttl = max(30, int(config.get("portals_stats_cache_seconds", 60)))
+    if row and time.time() - float(row[1]) < ttl:
+        try:
+            return json.loads(row[0])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    try:
+        payload = request(
+            session, "/collections", params={"search": collection, "limit": 10}, token=token
+        )
+        rows = payload.get("collections") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            raise RuntimeError("Portals изменил схему статистики коллекций")
+        match = next(
+            (entry for entry in rows
+             if str(entry.get("name", "")).casefold() == collection.casefold()),
+            None,
+        )
+        if not isinstance(match, dict):
+            raise RuntimeError(f"Portals не нашёл статистику {collection}")
+        db.execute(
+            "INSERT OR REPLACE INTO portals_collection_stats VALUES (?, ?, ?)",
+            (collection, json.dumps(match), time.time()),
+        )
+        db.commit()
+        return match
+    except (RuntimeError, PortalsRateLimited):
+        if row:
+            try:
+                return json.loads(row[0])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+        raise
+
+
 def cached_book(db, session, token, *, collection, config, collection_id=None,
                 model=None, backdrop=None):
     db.execute(
@@ -282,23 +331,29 @@ def add_portals_floor(item, result, config, secrets, db, *, base_market="Tonnel"
         return None
     enriched = dict(result)
     floors = [{"market": base_market, "floor": enriched.get("next_floor")}]
-    if enriched.get("next_floor") is None:
-        enriched["market_floors"] = []
-        return enriched
     token = str(secrets.get("portals_token", "")).strip()
-    try:
-        with requests.Session(
-            impersonate="chrome",
-            curl_options={CurlOpt.HTTP_VERSION: CurlHttpVersion.V1_1},
-        ) as session:
+    stats = {}
+    with requests.Session(
+        impersonate="chrome",
+        curl_options={CurlOpt.HTTP_VERSION: CurlHttpVersion.V1_1},
+    ) as session:
+        try:
             book, minimum, spread = basis_book(db, session, token, item, enriched, config)
-        floor = stable_floor(item, book, minimum, spread)
-        if floor is not None:
-            floors.append({"market": "Portals", "floor": floor})
-    except (RuntimeError, PortalsRateLimited):
-        pass
+            floor = stable_floor(item, book, minimum, spread)
+            if floor is not None:
+                floors.append({"market": "Portals", "floor": floor})
+        except (RuntimeError, PortalsRateLimited):
+            pass
+        try:
+            stats = collection_stats(db, session, token, item["name"], config)
+        except (RuntimeError, PortalsRateLimited):
+            pass
     enriched["market_floors"] = [entry for entry in floors if entry["floor"] is not None]
-    return enriched
+    enriched = complete_market_floors(item, enriched, db, config)
+    return apply_activity_evidence(
+        item, enriched, db, config,
+        portals_sales_24h=stats.get("sales_24h_count", 0),
+    )
 
 
 def tonnel_comparable_floor(item, result, config):
@@ -329,13 +384,12 @@ def portals_scoring_config(config):
     return result
 
 
+def listing_link(item):
+    return APP_URL + "?startapp=gift_" + str(item["gift_id"])
+
+
 def format_alert(item, result, config):
-    gift_slug = slug(item)
-    gift_link = f"https://t.me/nft/{gift_slug}" if gift_slug else ""
-    listing_link = APP_URL + "?startapp=gift_" + str(item["gift_id"])
-    return format_market_alert(
-        item, result, market="Portals", listing_link=listing_link, gift_link=gift_link
-    )
+    return format_market_alert(item, result, market="Portals")
 
 
 def send_if_new_price(item, result, config, secrets, db, send=True):
@@ -353,7 +407,7 @@ def send_if_new_price(item, result, config, secrets, db, send=True):
         return False
     gift_slug = slug(item)
     preview_url = f"https://t.me/nft/{gift_slug}" if gift_slug else None
-    telegram(secrets, text, preview_url=preview_url)
+    telegram(secrets, text, preview_url=preview_url, button_url=listing_link(item))
     db.execute(
         "INSERT OR REPLACE INTO portals_alerts VALUES (?, ?, ?)",
         (key, str(result["price"]), time.time()),
@@ -396,6 +450,16 @@ def process_listing(item, config, secrets, db, session, token, send=True):
     except RuntimeError:
         pass
     result["market_floors"] = floors
+    stats = {}
+    try:
+        stats = collection_stats(db, session, token, item["name"], config)
+    except (RuntimeError, PortalsRateLimited):
+        pass
+    result = complete_market_floors(item, result, db, config)
+    result = apply_activity_evidence(
+        item, result, db, config,
+        portals_sales_24h=stats.get("sales_24h_count", 0),
+    )
     return send_if_new_price(item, result, config, secrets, db, send)
 
 
@@ -412,7 +476,19 @@ def run_cycle(config, secrets, db, session, token="", send=True):
     for item in reversed(latest):
         key = str(item["gift_id"])
         old = db.execute("SELECT price FROM portals_seen WHERE id=?", (key,)).fetchone()
-        if old and item["price"] >= decimal(old[0]):
+        old_price = decimal(old[0]) if old else None
+        if old_price is not None and item["price"] == old_price:
+            continue
+        kind = "listing" if old_price is None else "price"
+        record_market_activity(
+            db, f"portals:{key}:{kind}:{item['price']}", "portals", item.get("name"), kind,
+            parse_time(item.get("listed_at")) or time.time(),
+        )
+        if old_price is not None and item["price"] > old_price:
+            db.execute(
+                "INSERT OR REPLACE INTO portals_seen VALUES (?, ?, ?)",
+                (key, str(item["price"]), time.time()),
+            )
             continue
         checked += 1
         processed = False

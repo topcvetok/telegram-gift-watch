@@ -78,7 +78,7 @@ class MrktTests(unittest.TestCase):
         self.assertIsNone(watch.mrkt_item(raw_gift(isLocked=True)))
         self.assertIsNone(watch.mrkt_item(raw_gift(nextResaleDate="2999-01-01T00:00:00Z")))
 
-    def test_direct_link_is_in_alert(self):
+    def test_direct_link_is_kept_for_button(self):
         item = watch.mrkt_item(raw_gift())
         result = {
             "quality": "рискованный", "price": Decimal("10"), "rate": Decimal("100"),
@@ -90,7 +90,8 @@ class MrktTests(unittest.TestCase):
         }
         text = watch.format_alert(item, result, self.config)
         self.assertIn("оффер на MRKT", text)
-        self.assertIn("https://t.me/mrkt/app?startapp=giftg1", text)
+        self.assertNotIn("Открыть оффер", text)
+        self.assertEqual(watch.listing_link(item), "https://t.me/mrkt/app?startapp=giftg1")
 
     def test_sale_is_recorded_once(self):
         db = sqlite3.connect(":memory:")
@@ -167,9 +168,9 @@ class MrktTests(unittest.TestCase):
             ))
         self.assertEqual(send.call_count, 1)
         self.assertIn("оффер на MRKT", send.call_args.args[1])
-        self.assertIn(
+        self.assertEqual(
+            send.call_args.kwargs["button_url"],
             "https://t.me/mrkt/app?startapp=feedlisting1",
-            send.call_args.args[1],
         )
 
     def test_missing_token_does_not_break_tonnel_process(self):

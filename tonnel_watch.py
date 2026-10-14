@@ -17,6 +17,7 @@ except ImportError:
 
 from bot import ROOT, telegram
 from alert_format import format_market_alert
+from market_data import record_market_activity
 
 TONNEL_URL = "https://gifts2.tonnel.network/api/pageGifts"
 EVENTS_URL = "https://gifts.coffin.meme/api/marketplace/events"
@@ -512,13 +513,12 @@ def apply_sales_evidence(item, result, db, config, now=None):
     return enriched
 
 
+def listing_link(item):
+    return f"https://t.me/tonnel_network_bot/gift?startapp={item['gift_id']}"
+
+
 def format_alert(item, result, config):
-    nft_slug = slug(item)
-    nft_link = f"https://t.me/nft/{nft_slug}" if nft_slug else ""
-    listing_link = f"https://t.me/tonnel_network_bot/gift?startapp={item['gift_id']}"
-    return format_market_alert(
-        item, result, market="Tonnel", listing_link=listing_link, gift_link=nft_link
-    )
+    return format_market_alert(item, result, market="Tonnel")
 
 
 def attach_cross_market_floors(item, result, config, secrets, db):
@@ -540,7 +540,7 @@ def send_if_new_price(item, result, config, secrets, db, send):
         return False
     nft_slug = slug(item)
     preview_url = f"https://t.me/nft/{nft_slug}" if nft_slug else None
-    telegram(secrets, text, preview_url=preview_url)
+    telegram(secrets, text, preview_url=preview_url, button_url=listing_link(item))
     db.execute(
         "INSERT OR REPLACE INTO tonnel_alerts VALUES (?, ?, ?)",
         (key, str(result["price"]), time.time()),
@@ -575,6 +575,30 @@ def event_item(event):
     }
 
 
+def record_event_activity(event, db):
+    if not isinstance(event, dict):
+        return False
+    event_id = event.get("eventId")
+    data = event.get("data")
+    gift = data.get("gift") if isinstance(data, dict) else None
+    name = gift.get("gift_name") if isinstance(gift, dict) else None
+    event_type = str(event.get("type") or "").casefold()
+    if event_type == "sale.completed":
+        kind = "sale"
+    elif "price" in event_type:
+        kind = "price"
+    elif "listing" in event_type and "created" in event_type:
+        kind = "listing"
+    elif "listing" in event_type:
+        kind = "delisting"
+    else:
+        kind = "other"
+    return record_market_activity(
+        db, f"tonnel:{event_id}", "tonnel", name, kind,
+        event_timestamp(event.get("occurredAt")),
+    )
+
+
 def collection_enabled(name, config):
     return bool(config.get("monitor_all_collections")) or name in config["tonnel_collections"]
 
@@ -595,6 +619,7 @@ def process_event(event, config, secrets, db, send=True):
         return False
 
     delivered = False
+    record_event_activity(event, db)
     record_sale(event, db)
     item = event_item(event)
     if item is not None and collection_enabled(item.get("name"), config):

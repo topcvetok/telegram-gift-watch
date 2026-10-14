@@ -15,6 +15,7 @@ except ImportError:
 
 from bot import ROOT, telegram
 from alert_format import format_market_alert
+from market_data import complete_market_floors, record_market_activity
 from tonnel_watch import apply_sales_evidence, best_score, decimal, load_rate, slug
 
 API_URL = "https://api.tgmrkt.io/api/v1"
@@ -251,18 +252,17 @@ def record_sale(event, db):
     return db.total_changes > before
 
 
-def format_alert(item, result, config):
-    nft_slug = slug(item)
-    nft_link = f"https://t.me/nft/{nft_slug}" if nft_slug else ""
+def listing_link(item):
     event_id = item.get("listing_event_id")
     if event_id:
         start_param = "feed" + str(event_id).replace("-", "")
     else:
         start_param = "gift" + str(item["gift_id"]).replace("-", "")
-    listing_link = f"https://t.me/mrkt/app?startapp={start_param}"
-    return format_market_alert(
-        item, result, market="MRKT", listing_link=listing_link, gift_link=nft_link
-    )
+    return f"https://t.me/mrkt/app?startapp={start_param}"
+
+
+def format_alert(item, result, config):
+    return format_market_alert(item, result, market="MRKT")
 
 
 def attach_cross_market_floors(item, result, config, secrets, db):
@@ -281,7 +281,7 @@ def attach_cross_market_floors(item, result, config, secrets, db):
             )
     except RuntimeError:
         pass
-    return enriched
+    return complete_market_floors(item, enriched, db, config)
 
 
 def send_if_new_price(item, result, config, secrets, db, send=True):
@@ -299,7 +299,7 @@ def send_if_new_price(item, result, config, secrets, db, send=True):
         return False
     nft_slug = slug(item)
     preview_url = f"https://t.me/nft/{nft_slug}" if nft_slug else None
-    telegram(secrets, text, preview_url=preview_url)
+    telegram(secrets, text, preview_url=preview_url, button_url=listing_link(item))
     db.execute(
         "INSERT OR REPLACE INTO mrkt_alerts VALUES (?, ?, ?)",
         (key, str(result["price"]), time.time()),
@@ -318,9 +318,21 @@ def process_event(event, config, secrets, db, session, token, send=True):
     )
     if db.execute("SELECT 1 FROM mrkt_events WHERE id=?", (event_id,)).fetchone():
         return False
+    raw = event.get("gift")
+    event_type = str(event.get("type", "")).casefold()
+    if event_type == "sale":
+        kind = "sale"
+    elif event_type == "changeprice":
+        kind = "price"
+    else:
+        kind = "listing"
+    if isinstance(raw, dict):
+        record_market_activity(
+            db, f"mrkt:{event_id}", "mrkt", raw.get("collectionName"), kind,
+            parse_time(event.get("date") or event.get("createdAt")) or time.time(),
+        )
     record_sale(event, db)
     delivered = False
-    event_type = str(event.get("type", "")).casefold()
     if event_type in ("listing", "changeprice"):
         item = mrkt_item(event.get("gift"), event)
         if item is not None:

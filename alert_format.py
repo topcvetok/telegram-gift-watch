@@ -14,7 +14,7 @@ def _ton(value):
     return f"{value:.3f} TON"
 
 
-def format_market_alert(item, result, *, market, listing_link, gift_link):
+def format_market_alert(item, result, *, market):
     """Render the compact evidence-first alert requested by the user."""
     icon, risk = RISK_LABELS.get(result.get("quality"), RISK_LABELS["рискованный"])
     price = result["price"]
@@ -27,28 +27,34 @@ def format_market_alert(item, result, *, market, listing_link, gift_link):
     for entry in floors:
         floor = entry.get("floor")
         if floor is None:
+            floor_lines.append(
+                f"{escape(str(entry.get('market') or '?'))} — нет данных по этому основанию"
+            )
             continue
         difference = floor - price
         percent = difference / price * 100 if price > 0 else 0
+        note = "" if entry.get("verified", True) else " · внешний floor"
         floor_lines.append(
             f"{escape(str(entry.get('market') or '?'))} — {_ton(floor)} "
-            f"({difference:+.3f} TON / {percent:+.1f}%)"
+            f"({difference:+.3f} TON / {percent:+.1f}%{note})"
         )
     if not floor_lines:
         floor_lines.append("Нет подтверждённого устойчивого floor")
 
-    recent = []
-    for sale in list(result.get("recent_sales") or [])[:3]:
-        source = escape(str(sale.get("source") or "рынок").capitalize())
-        recent.append(f"{source} — {_ton(sale['price'])}")
-    history = "; ".join(recent) if recent else "пока нет подтверждённых продаж"
-
     basis = escape(str(result.get("basis") or "вся коллекция"))
     model = escape(str(item.get("model") or "не указана"))
     backdrop = escape(str(item.get("backdrop") or "не указан"))
-    collection_sales = int(result.get("collection_sales_24h", 0))
-    basis_sales = int(result.get("basis_sales_24h", 0))
+    sales = int(result.get("activity_sales_24h", result.get("collection_sales_24h", 0)))
+    listings = int(result.get("activity_listings_24h", 0))
+    price_changes = int(result.get("activity_price_changes_24h", 0))
+    other = int(result.get("activity_other_24h", 0))
+    activity = int(result.get("activity_24h", sales + listings + price_changes))
     liquidity = escape(str(result.get("liquidity") or "низкая"))
+    activity_line = (
+        f"Сделки: {sales} · новые листинги: {listings} · изменения цены: {price_changes}"
+    )
+    if other:
+        activity_line += f" · прочие события: {other}"
 
     lines = [
         f"<b>{icon} {risk}: оффер на {escape(market)}</b>",
@@ -62,16 +68,10 @@ def format_market_alert(item, result, *, market, listing_link, gift_link):
         "<b>Устойчивые floor:</b>",
         *floor_lines,
         "",
-        f"<b>Ликвидность:</b> {liquidity} ({collection_sales} продаж за 24 ч)",
-        f"<b>Продажи по основанию за 24 ч:</b> {basis_sales}",
-        f"<b>История продаж:</b> {history}",
+        f"<b>Ликвидность:</b> {liquidity} (активность за 24 ч: {activity})",
+        activity_line,
         "",
         f"Расчётная прибыль: {result['profit_rub']:.0f} ₽ "
         f"при быстрой продаже за {_ton(result['resale'])}",
     ]
-    if gift_link:
-        lines.extend(["", f'<a href="{escape(gift_link, quote=True)}">Подарок в Telegram</a>'])
-    lines.append(
-        f'<a href="{escape(listing_link, quote=True)}">Открыть оффер на {escape(market)}</a>'
-    )
     return "\n".join(lines)

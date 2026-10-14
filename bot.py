@@ -140,7 +140,7 @@ def message(item, result, rule, complete):
             + "Перед покупкой проверь доступность и ограничения.\n" + link)
 
 
-def telegram(secrets, text, *, preview_url=None):
+def telegram(secrets, text, *, preview_url=None, button_url=None):
     preview_options = {"is_disabled": True}
     if preview_url:
         preview_options = {
@@ -149,11 +149,19 @@ def telegram(secrets, text, *, preview_url=None):
             "prefer_large_media": True,
             "show_above_text": True,
         }
+    payload = {
+        "chat_id": secrets["chat_id"],
+        "text": text,
+        "parse_mode": "HTML",
+        "link_preview_options": preview_options,
+    }
+    if button_url:
+        payload["reply_markup"] = {
+            "inline_keyboard": [[{"text": "Открыть оффер", "url": button_url}]]
+        }
     result = request_json(
         f"https://api.telegram.org/bot{secrets['bot_token']}/sendMessage",
-        {"chat_id": secrets["chat_id"], "text": text,
-         "parse_mode": "HTML",
-         "link_preview_options": preview_options})
+        payload)
     if not isinstance(result, dict) or result.get("ok") is not True:
         raise RuntimeError("Telegram не подтвердил доставку")
 

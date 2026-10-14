@@ -223,13 +223,14 @@ class TonnelScoringTests(unittest.TestCase):
     def test_slug(self):
         self.assertEqual(watch.slug(gift(123, 2.0)), "chillflame-123")
 
-    def test_alert_contains_direct_tonnel_listing_link(self):
+    def test_tonnel_listing_link_is_used_by_button(self):
         item = gift(-660800007, 2.50)
         result = watch.score(item, self.floor, Decimal("124.42"), self.config)
         message = watch.format_alert(item, result, self.config)
-        self.assertIn(
+        self.assertNotIn("Открыть оффер", message)
+        self.assertEqual(
+            watch.listing_link(item),
             "https://t.me/tonnel_network_bot/gift?startapp=-660800007",
-            message,
         )
 
     def test_sale_event_is_recorded_once(self):

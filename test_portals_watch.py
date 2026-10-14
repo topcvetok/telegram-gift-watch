@@ -109,7 +109,7 @@ class PortalsTests(unittest.TestCase):
         self.assertEqual(second[0]["price"], Decimal("12.34"))
         self.assertEqual(fetch.call_count, 1)
 
-    def test_alert_uses_requested_format_and_links(self):
+    def test_alert_uses_requested_format_without_visible_links_or_history(self):
         item = watch.portals_item(raw_gift())
         result = {
             "quality": "нормальный", "price": Decimal("8"), "rate": Decimal("100"),
@@ -130,9 +130,13 @@ class PortalsTests(unittest.TestCase):
         self.assertIn("СРЕДНИЙ РИСК: оффер на Portals", text)
         self.assertIn("<b>Устойчивые floor:</b>", text)
         self.assertIn("Tonnel — 11.500 TON", text)
-        self.assertIn("История продаж:", text)
-        self.assertIn("https://t.me/nft/evileye-42", text)
-        self.assertIn("https://t.me/portals/market?startapp=gift_p1", text)
+        self.assertNotIn("История продаж:", text)
+        self.assertNotIn("https://t.me/nft/evileye-42", text)
+        self.assertNotIn("Открыть оффер", text)
+        self.assertEqual(
+            watch.listing_link(item),
+            "https://t.me/portals/market?startapp=gift_p1",
+        )
 
     def test_same_or_higher_price_is_not_sent_twice(self):
         db = sqlite3.connect(":memory:")
@@ -158,6 +162,10 @@ class PortalsTests(unittest.TestCase):
             send.call_args.kwargs["preview_url"],
             "https://t.me/nft/evileye-42",
         )
+        self.assertEqual(
+            send.call_args.kwargs["button_url"],
+            "https://t.me/portals/market?startapp=gift_p1",
+        )
 
     def test_listing_is_scored_with_model_and_allowed_backdrop(self):
         db = sqlite3.connect(":memory:")
@@ -172,6 +180,8 @@ class PortalsTests(unittest.TestCase):
         with patch.object(watch, "load_rate", return_value=Decimal("100")), \
                 patch.object(watch, "cached_book", side_effect=book), \
                 patch.object(watch, "tonnel_comparable_floor", return_value=Decimal("11")), \
+                patch.object(watch, "collection_stats", return_value={"sales_24h_count": 82}), \
+                patch.object(watch, "complete_market_floors", side_effect=lambda _i, r, *_: r), \
                 patch.object(watch, "telegram") as send:
             self.assertTrue(watch.process_listing(
                 item, self.config, {}, db, Mock(), "", send=True
@@ -180,6 +190,24 @@ class PortalsTests(unittest.TestCase):
         message = send.call_args.args[1]
         self.assertIn("оффер на Portals", message)
         self.assertIn("Tonnel — 11.000 TON", message)
+        self.assertIn("активность за 24 ч: 82", message)
+
+    def test_feed_records_listing_and_price_change_once(self):
+        db = sqlite3.connect(":memory:")
+        original = watch.portals_item(raw_gift(price="8"))
+        raised = watch.portals_item(raw_gift(price="9"))
+        with patch.object(watch, "fetch_listings", side_effect=[
+                    [original], [original], [raised]
+                ]), patch.object(watch, "process_listing", return_value=False) as process, \
+                patch("builtins.print"):
+            watch.run_cycle(self.config, {}, db, Mock(), send=False)
+            watch.run_cycle(self.config, {}, db, Mock(), send=False)
+            watch.run_cycle(self.config, {}, db, Mock(), send=False)
+        rows = db.execute(
+            "SELECT kind, COUNT(*) FROM market_activity GROUP BY kind ORDER BY kind"
+        ).fetchall()
+        self.assertEqual(rows, [("listing", 1), ("price", 1)])
+        self.assertEqual(process.call_count, 1)
 
     def test_fail_fast_run_reports_unavailable_portals(self):
         db = sqlite3.connect(":memory:")

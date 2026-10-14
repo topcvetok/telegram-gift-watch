@@ -69,11 +69,13 @@ class SignalTests(unittest.TestCase):
 
     def test_telegram_enables_large_gift_preview(self):
         preview = "https://t.me/nft/PlushPepe-1098"
+        offer = "https://t.me/portals/market?startapp=gift_test"
         with patch.object(bot, "request_json", return_value={"ok": True}) as request:
             bot.telegram(
                 {"bot_token": "1:test", "chat_id": "42"},
                 "offer",
                 preview_url=preview,
+                button_url=offer,
             )
         payload = request.call_args.args[1]
         self.assertEqual(payload["link_preview_options"], {
@@ -81,6 +83,9 @@ class SignalTests(unittest.TestCase):
             "url": preview,
             "prefer_large_media": True,
             "show_above_text": True,
+        })
+        self.assertEqual(payload["reply_markup"], {
+            "inline_keyboard": [[{"text": "Открыть оффер", "url": offer}]]
         })
 
 
