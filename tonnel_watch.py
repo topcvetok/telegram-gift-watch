@@ -16,6 +16,7 @@ except ImportError:
     raise SystemExit("Не установлен curl_cffi. Запусти start_watch.command.")
 
 from bot import ROOT, telegram
+from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
 
@@ -540,7 +541,10 @@ def send_if_new_price(item, result, config, secrets, db, send):
         return False
     nft_slug = slug(item)
     preview_url = f"https://t.me/nft/{nft_slug}" if nft_slug else None
-    telegram(secrets, text, preview_url=preview_url, button_url=listing_link(item))
+    message_id = telegram(
+        secrets, text, preview_url=preview_url, button_url=listing_link(item)
+    )
+    remember_alert(db, "Tonnel", item, result, message_id)
     db.execute(
         "INSERT OR REPLACE INTO tonnel_alerts VALUES (?, ?, ?)",
         (key, str(result["price"]), time.time()),
@@ -621,6 +625,14 @@ def process_event(event, config, secrets, db, send=True):
     delivered = False
     record_event_activity(event, db)
     record_sale(event, db)
+    if event.get("type") == "sale.completed":
+        data = event.get("data")
+        sold_gift = data.get("gift") if isinstance(data, dict) else None
+        if isinstance(sold_gift, dict) and sold_gift.get("gift_id") is not None:
+            mark_offer_sold(
+                db, "Tonnel", sold_gift["gift_id"], secrets,
+                sale_price=data.get("price"), send=send,
+            )
     item = event_item(event)
     if item is not None and collection_enabled(item.get("name"), config):
         rate = load_rate(db)

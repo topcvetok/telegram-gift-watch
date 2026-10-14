@@ -253,6 +253,17 @@ class PortalsTests(unittest.TestCase):
         self.assertEqual(rows, [("listing", 1), ("price", 1)])
         self.assertEqual(process.call_count, 1)
 
+    def test_sold_listing_edits_its_alert(self):
+        db = sqlite3.connect(":memory:")
+        with patch.object(watch, "pending_offer_ids", return_value=["p1"]), \
+                patch.object(watch, "fetch_nft", return_value=raw_gift(status="sold")), \
+                patch.object(watch, "mark_offer_sold", return_value=True) as sold:
+            self.assertEqual(
+                watch.refresh_sold_alerts(self.config, {}, db, Mock()), 1
+            )
+        sold.assert_called_once()
+        self.assertEqual(sold.call_args.args[1:3], ("Portals", "p1"))
+
     def test_fail_fast_run_reports_unavailable_portals(self):
         db = sqlite3.connect(":memory:")
         session = Mock()

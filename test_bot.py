@@ -70,13 +70,16 @@ class SignalTests(unittest.TestCase):
     def test_telegram_enables_large_gift_preview(self):
         preview = "https://t.me/nft/PlushPepe-1098"
         offer = "https://t.me/portals/market?startapp=gift_test"
-        with patch.object(bot, "request_json", return_value={"ok": True}) as request:
-            bot.telegram(
+        with patch.object(bot, "request_json", return_value={
+            "ok": True, "result": {"message_id": 321}
+        }) as request:
+            message_id = bot.telegram(
                 {"bot_token": "1:test", "chat_id": "42"},
                 "offer",
                 preview_url=preview,
                 button_url=offer,
             )
+        self.assertEqual(message_id, 321)
         payload = request.call_args.args[1]
         self.assertEqual(payload["link_preview_options"], {
             "is_disabled": False,
@@ -87,6 +90,17 @@ class SignalTests(unittest.TestCase):
         self.assertEqual(payload["reply_markup"], {
             "inline_keyboard": [[{"text": "Открыть оффер", "url": offer}]]
         })
+
+    def test_telegram_edit_removes_offer_button_and_preview(self):
+        with patch.object(bot, "request_json", return_value={"ok": True}) as request:
+            self.assertTrue(bot.telegram_edit(
+                {"bot_token": "1:test", "chat_id": "42"}, 321, "sold"
+            ))
+        self.assertIn("editMessageText", request.call_args.args[0])
+        payload = request.call_args.args[1]
+        self.assertEqual(payload["message_id"], 321)
+        self.assertEqual(payload["reply_markup"], {"inline_keyboard": []})
+        self.assertTrue(payload["link_preview_options"]["is_disabled"])
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ except ImportError:
     raise SystemExit("Не установлен curl_cffi. Запусти start_watch.command.")
 
 from bot import ROOT, telegram
+from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
 from tonnel_watch import apply_sales_evidence, best_score, decimal, load_rate, slug
@@ -292,7 +293,10 @@ def send_if_new_price(item, result, config, secrets, db, send=True):
         return False
     nft_slug = slug(item)
     preview_url = f"https://t.me/nft/{nft_slug}" if nft_slug else None
-    telegram(secrets, text, preview_url=preview_url, button_url=listing_link(item))
+    message_id = telegram(
+        secrets, text, preview_url=preview_url, button_url=listing_link(item)
+    )
+    remember_alert(db, "MRKT", item, result, message_id)
     db.execute(
         "INSERT OR REPLACE INTO mrkt_alerts VALUES (?, ?, ?)",
         (key, str(result["price"]), time.time()),
@@ -325,6 +329,15 @@ def process_event(event, config, secrets, db, session, token, send=True):
             parse_time(event.get("date") or event.get("createdAt")) or time.time(),
         )
     record_sale(event, db)
+    if event_type == "sale" and isinstance(raw, dict) and raw.get("id") is not None:
+        sale_price = None
+        try:
+            sale_price = nano_to_ton(event.get("amount") or raw.get("salePrice"))
+        except ValueError:
+            pass
+        mark_offer_sold(
+            db, "MRKT", raw["id"], secrets, sale_price=sale_price, send=send
+        )
     delivered = False
     if event_type in ("listing", "changeprice"):
         item = mrkt_item(event.get("gift"), event)

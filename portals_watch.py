@@ -16,6 +16,7 @@ except ImportError:
 
 from alert_format import format_market_alert
 from bot import ROOT, telegram
+from alert_tracking import mark_offer_sold, pending_offer_ids, remember_alert
 from market_data import (
     apply_activity_evidence,
     complete_market_floors,
@@ -167,6 +168,34 @@ def fetch_listings(session, token="", *, sort="price asc", limit=20,
     if not isinstance(rows, list):
         raise RuntimeError("Portals изменил схему каталога")
     return [item for raw in rows if (item := portals_item(raw)) is not None]
+
+
+def fetch_nft(session, token, gift_id):
+    payload = request(session, f"/nfts/{gift_id}", token=token)
+    if not isinstance(payload, dict):
+        raise RuntimeError("Portals изменил схему карточки подарка")
+    return payload
+
+
+def refresh_sold_alerts(config, secrets, db, session, token="", send=True):
+    ids = pending_offer_ids(
+        db, "Portals",
+        interval=int(config.get("portals_sold_check_interval_seconds", 30)),
+        limit=int(config.get("portals_sold_check_batch", 5)),
+    )
+    changed = 0
+    for gift_id in ids:
+        try:
+            raw = fetch_nft(session, token, gift_id)
+        except (RuntimeError, PortalsRateLimited):
+            continue
+        if str(raw.get("status") or "").casefold() != "sold":
+            continue
+        changed += int(mark_offer_sold(
+            db, "Portals", gift_id, secrets,
+            sale_price=raw.get("price"), send=send,
+        ))
+    return changed
 
 
 def resolve_collection_id(db, session, token, collection):
@@ -496,7 +525,10 @@ def send_if_new_price(item, result, config, secrets, db, send=True):
         return False
     gift_slug = slug(item)
     preview_url = f"https://t.me/nft/{gift_slug}" if gift_slug else None
-    telegram(secrets, text, preview_url=preview_url, button_url=listing_link(item))
+    message_id = telegram(
+        secrets, text, preview_url=preview_url, button_url=listing_link(item)
+    )
+    remember_alert(db, "Portals", item, result, message_id)
     db.execute(
         "INSERT OR REPLACE INTO portals_alerts VALUES (?, ?, ?)",
         (key, str(result["price"]), time.time()),
@@ -542,6 +574,7 @@ def run_cycle(config, secrets, db, session, token="", send=True):
     latest = fetch_listings(
         session, token, sort="listed_at desc", limit=int(config.get("portals_feed_limit", 20))
     )
+    refresh_sold_alerts(config, secrets, db, session, token, send)
     db.execute(
         "CREATE TABLE IF NOT EXISTS portals_seen "
         "(id TEXT PRIMARY KEY, price TEXT, processed REAL)"

@@ -164,6 +164,27 @@ def telegram(secrets, text, *, preview_url=None, button_url=None):
         payload)
     if not isinstance(result, dict) or result.get("ok") is not True:
         raise RuntimeError("Telegram не подтвердил доставку")
+    message = result.get("result")
+    message_id = message.get("message_id") if isinstance(message, dict) else None
+    return message_id if isinstance(message_id, int) and message_id > 0 else None
+
+
+def telegram_edit(secrets, message_id, text):
+    payload = {
+        "chat_id": secrets["chat_id"],
+        "message_id": int(message_id),
+        "text": text,
+        "parse_mode": "HTML",
+        "link_preview_options": {"is_disabled": True},
+        "reply_markup": {"inline_keyboard": []},
+    }
+    result = request_json(
+        f"https://api.telegram.org/bot{secrets['bot_token']}/editMessageText",
+        payload,
+    )
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        raise RuntimeError("Telegram не подтвердил изменение сообщения")
+    return True
 
 
 def setup():

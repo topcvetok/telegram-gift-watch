@@ -104,6 +104,19 @@ class MrktTests(unittest.TestCase):
         row = db.execute("SELECT source, price FROM tonnel_sales").fetchone()
         self.assertEqual(row, ("mrkt", "11"))
 
+    def test_sale_event_marks_sent_offer_as_sold(self):
+        db = sqlite3.connect(":memory:")
+        event = {
+            "id": "sale-1", "type": "Sale", "amount": 11_000_000_000,
+            "date": "2026-10-13T00:00:00Z", "gift": raw_gift(),
+        }
+        with patch.object(watch, "mark_offer_sold", return_value=True) as sold:
+            self.assertFalse(watch.process_event(
+                event, self.config, {}, db, Mock(), "token", send=True
+            ))
+        sold.assert_called_once()
+        self.assertEqual(sold.call_args.args[1:3], ("MRKT", "g1"))
+
     def test_same_or_higher_price_is_not_sent_twice(self):
         db = sqlite3.connect(":memory:")
         item = watch.mrkt_item(raw_gift())

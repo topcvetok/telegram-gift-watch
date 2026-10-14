@@ -243,6 +243,14 @@ class TonnelScoringTests(unittest.TestCase):
             ).fetchall()
         self.assertEqual(rows, [("Chill Flame", "Rare Model (1%)", "7.5")])
 
+    def test_sale_event_marks_sent_offer_as_sold(self):
+        with sqlite3.connect(":memory:") as db, \
+                patch.object(watch, "mark_offer_sold", return_value=True) as sold:
+            event = sale_event(10, 7.5, watch.time.time())
+            self.assertFalse(watch.process_event(event, self.config, {}, db, send=True))
+        sold.assert_called_once()
+        self.assertEqual(sold.call_args.args[1:3], ("Tonnel", 10))
+
     def test_sales_metrics_use_exact_model_basis(self):
         now = watch.time.time()
         with sqlite3.connect(":memory:") as db:
