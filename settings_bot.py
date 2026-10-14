@@ -28,30 +28,37 @@ def settings_text(config, db):
     current = effective_config(config, db)
     return (
         "<b>Настройки Gift Watch</b>\n\n"
-        f"Максимальная стоимость подарка: <b>{current['max_lot_rub']} ₽</b>\n"
-        f"Минимальный floor: <b>{current['min_floor_rub']} ₽</b>\n\n"
-        "Кнопки применяют настройку сразу ко всем площадкам.\n"
+        f"💰 Максимальная стоимость: <b>{format_rubles(current['max_lot_rub'])} ₽</b>\n"
+        f"📊 Минимальный floor: <b>{format_rubles(current['min_floor_rub'])} ₽</b>\n\n"
+        "Нажми нужное значение ниже — оно сразу применится ко всем площадкам.\n\n"
         "Точное значение: <code>/maxprice 2500</code> или "
         "<code>/minfloor 1200</code>."
     )
 
 
-def settings_keyboard(config):
+def format_rubles(value):
+    return f"{int(value):,}".replace(",", " ")
+
+
+def settings_keyboard(config, db):
     limit = max_purchase_limit(config)
     max_values = [value for value in MAX_PRICE_PRESETS if limit is None or value <= limit]
-    return {
-        "inline_keyboard": [
-            [{
-                "text": f"Макс. {value} ₽",
-                "callback_data": f"setting:max_lot_rub:{value}",
-            } for value in max_values],
-            [{
-                "text": f"Floor {value} ₽",
-                "callback_data": f"setting:min_floor_rub:{value}",
-            } for value in MIN_FLOOR_PRESETS],
-            [{"text": "Обновить", "callback_data": "settings:refresh"}],
-        ]
-    }
+    current = effective_config(config, db)
+    rows = []
+    for value in max_values:
+        marker = "✅" if value == current["max_lot_rub"] else "💰"
+        rows.append([{
+            "text": f"{marker} Максимальная цена — {format_rubles(value)} ₽",
+            "callback_data": f"setting:max_lot_rub:{value}",
+        }])
+    for value in MIN_FLOOR_PRESETS:
+        marker = "✅" if value == current["min_floor_rub"] else "📊"
+        rows.append([{
+            "text": f"{marker} Минимальный floor — {format_rubles(value)} ₽",
+            "callback_data": f"setting:min_floor_rub:{value}",
+        }])
+    rows.append([{"text": "🔄 Обновить настройки", "callback_data": "settings:refresh"}])
+    return {"inline_keyboard": rows}
 
 
 def show_settings(secrets, config, db, *, message_id=None):
@@ -59,7 +66,7 @@ def show_settings(secrets, config, db, *, message_id=None):
         "chat_id": secrets["chat_id"],
         "text": settings_text(config, db),
         "parse_mode": "HTML",
-        "reply_markup": settings_keyboard(config),
+        "reply_markup": settings_keyboard(config, db),
         "link_preview_options": {"is_disabled": True},
     }
     method = "sendMessage"

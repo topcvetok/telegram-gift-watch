@@ -40,8 +40,15 @@ class SettingsBotTests(unittest.TestCase):
     def test_settings_text_shows_live_values(self):
         settings_bot.apply_command("/minfloor 1800", self.config, self.db)
         text = settings_bot.settings_text(self.config, self.db)
-        self.assertIn("2000 ₽", text)
-        self.assertIn("1800 ₽", text)
+        self.assertIn("2 000 ₽", text)
+        self.assertIn("1 800 ₽", text)
+
+    def test_keyboard_uses_one_readable_button_per_row_and_marks_current_values(self):
+        rows = settings_bot.settings_keyboard(self.config, self.db)["inline_keyboard"]
+        self.assertTrue(all(len(row) == 1 for row in rows))
+        labels = [row[0]["text"] for row in rows]
+        self.assertIn("✅ Максимальная цена — 2 000 ₽", labels)
+        self.assertIn("✅ Минимальный floor — 1 000 ₽", labels)
 
 
 if __name__ == "__main__":
