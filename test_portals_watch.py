@@ -92,34 +92,31 @@ class PortalsTests(unittest.TestCase):
         self.assertEqual(watch.stable_floor(item, stable, 5, 0.08), Decimal("12.02"))
         self.assertIsNone(watch.stable_floor(item, unstable, 3, 0.08))
 
-    def test_cross_market_snapshot_has_model_and_collection_floors(self):
+    def test_cross_market_snapshot_has_only_model_floors(self):
         db = sqlite3.connect(":memory:")
         item = watch.portals_item(raw_gift())
         result = {"rate": Decimal("100")}
         with patch.object(
-                    watch, "tonnel_floor_pair",
-                    return_value=(Decimal("11"), Decimal("7")),
+                    watch, "tonnel_model_floor", return_value=Decimal("11"),
                 ), patch.object(
-                    watch, "portals_floor_pair",
-                    return_value=(Decimal("12"), Decimal("7.2")),
+                    watch, "portals_model_floor", return_value=Decimal("12"),
                 ), patch.object(
-                    watch, "mrkt_floor_pair",
-                    return_value=(Decimal("11.8"), Decimal("7.4")),
+                    watch, "mrkt_model_floor", return_value=Decimal("11.8"),
                 ), patch.object(
                     watch, "collection_stats", return_value={"sales_24h_count": 5},
-                ), patch("market_data._cached_catalog", return_value={"gifts": []}):
+                ):
             enriched = watch.add_portals_floor(
                 item, result, self.config, {"mrkt_token": "token"}, db,
                 portals_session=Mock(), mrkt_session=Mock(),
             )
         self.assertEqual(
             [
-                (row["market"], row["model_floor"], row["collection_floor"])
+                (row["market"], row["model_floor"])
                 for row in enriched["market_floors"]
             ],
-            [("Tonnel", Decimal("11"), Decimal("7")),
-             ("Portals", Decimal("12"), Decimal("7.2")),
-             ("MRKT", Decimal("11.8"), Decimal("7.4"))],
+            [("Tonnel", Decimal("11")),
+             ("Portals", Decimal("12")),
+             ("MRKT", Decimal("11.8"))],
         )
 
     def test_cached_book_restores_decimal_prices(self):
@@ -163,7 +160,7 @@ class PortalsTests(unittest.TestCase):
         self.assertIn("<b>Устойчивые floor:</b>", text)
         self.assertIn("<b>Tonnel</b>", text)
         self.assertIn("• модель: 11.500 TON", text)
-        self.assertIn("• коллекция: 7.000 TON", text)
+        self.assertNotIn("• коллекция:", text)
         self.assertNotIn("История продаж:", text)
         self.assertNotIn("https://t.me/nft/evileye-42", text)
         self.assertNotIn("Открыть оффер", text)
@@ -236,7 +233,7 @@ class PortalsTests(unittest.TestCase):
         message = send.call_args.args[1]
         self.assertIn("оффер на Portals", message)
         self.assertIn("• модель: 11.000 TON", message)
-        self.assertIn("• коллекция: 7.000 TON", message)
+        self.assertNotIn("• коллекция:", message)
         self.assertIn("активность за 24 ч: 82", message)
 
     def test_feed_records_listing_and_price_change_once(self):

@@ -2,13 +2,11 @@ import sqlite3
 import time
 import unittest
 from decimal import Decimal
-from unittest.mock import patch
-
 import market_data
 
 
 class MarketDataTests(unittest.TestCase):
-    def test_model_and_collection_floors_stay_separate_for_every_market(self):
+    def test_only_model_floors_are_kept_for_every_market(self):
         item = {"name": "Evil Eye"}
         result = {
             "basis_scope": "collection",
@@ -17,51 +15,36 @@ class MarketDataTests(unittest.TestCase):
                 "collection_floor": Decimal("7.1"),
             }],
         }
-        catalog = {
-            "gifts": [{
-                "name": "Evil Eye",
-                "tonnel_floor_ton": "7",
-                "portals_floor_ton": "7.2",
-                "mrkt_floor_ton": "7.4",
-            }]
-        }
-        with sqlite3.connect(":memory:") as db, \
-                patch.object(market_data, "_cached_catalog", return_value=catalog):
+        with sqlite3.connect(":memory:") as db:
             enriched = market_data.complete_market_floors(item, result, db, {})
         self.assertEqual(
             [
-                (row["market"], row["model_floor"], row["collection_floor"])
+                (row["market"], row["model_floor"])
                 for row in enriched["market_floors"]
             ],
-            [("Tonnel", Decimal("9.1"), Decimal("7.1")),
-             ("Portals", None, Decimal("7.2")),
-             ("MRKT", None, Decimal("7.4"))],
+            [("Tonnel", Decimal("9.1")), ("Portals", None), ("MRKT", None)],
         )
         self.assertTrue(enriched["market_floors"][0]["model_verified"])
-        self.assertFalse(enriched["market_floors"][2]["collection_verified"])
+        self.assertNotIn("collection_floor", enriched["market_floors"][0])
 
-    def test_catalog_collection_floor_never_replaces_missing_model_floor(self):
+    def test_legacy_collection_floor_is_discarded(self):
         item = {"name": "Evil Eye"}
         result = {
             "basis_scope": "model",
             "market_floors": [{"market": "Portals", "model_floor": Decimal("9")}],
         }
-        catalog_payload = {"gifts": [{
-            "name": "Evil Eye", "tonnel_floor_ton": "7",
-            "portals_floor_ton": "7.2", "mrkt_floor_ton": "7.4",
-        }]}
-        with sqlite3.connect(":memory:") as db, \
-                patch.object(market_data, "_cached_catalog", return_value=catalog_payload):
+        with sqlite3.connect(":memory:") as db:
             enriched = market_data.complete_market_floors(item, result, db, {})
         self.assertEqual(
             [
-                (row["market"], row["model_floor"], row["collection_floor"])
+                (row["market"], row["model_floor"])
                 for row in enriched["market_floors"]
             ],
-            [("Tonnel", None, Decimal("7")),
-             ("Portals", Decimal("9"), Decimal("7.2")),
-             ("MRKT", None, Decimal("7.4"))],
+            [("Tonnel", None), ("Portals", Decimal("9")), ("MRKT", None)],
         )
+        self.assertTrue(all(
+            "collection_floor" not in row for row in enriched["market_floors"]
+        ))
 
     def test_liquidity_uses_sales_listings_and_price_changes_for_collection(self):
         now = time.time()

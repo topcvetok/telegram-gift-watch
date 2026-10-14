@@ -29,7 +29,6 @@ from tonnel_watch import (
     decimal,
     eligible,
     fetch_collection,
-    load_collection_book,
     load_rate,
     load_variant_books,
     slug,
@@ -328,40 +327,30 @@ def basis_book(db, session, token, item, result, config):
     return book, minimum, spread
 
 
-def comparable_floor_pair(item, collection_book, model_book, config):
-    """Return stable floors for this exact model and for the whole collection."""
-    collection_floor = stable_floor(
-        item, collection_book, config["min_comparables"],
-        config["floor_cluster_max_spread_fraction"],
+def comparable_model_floor(item, model_book, config):
+    """Return the stable floor for the listing's exact model."""
+    if not item.get("model"):
+        return None
+    return stable_floor(
+        item, model_book, config["variant_min_comparables"],
+        config["variant_floor_cluster_max_spread_fraction"],
     )
-    model_floor = None
-    if item.get("model"):
-        model_floor = stable_floor(
-            item, model_book, config["variant_min_comparables"],
-            config["variant_floor_cluster_max_spread_fraction"],
-        )
-    return model_floor, collection_floor
 
 
-def tonnel_floor_pair(item, result, config, db):
+def tonnel_model_floor(item, result, config, db):
     tonnel_config = dict(config)
     tonnel_config.setdefault("collection_floor_cache_seconds", 20)
     tonnel_config.setdefault("variant_cache_seconds", 20)
     tonnel_config.setdefault("variant_workers", 1)
-    collection_book = load_collection_book(db, item["name"], tonnel_config)
     model_item = dict(item, backdrop=None)
     model_books = load_variant_books(
         db, item["name"], [model_item], result["rate"], tonnel_config, [1]
     )
     model_book = model_books.get(("model", item.get("model")), [])
-    return comparable_floor_pair(item, collection_book, model_book, config)
+    return comparable_model_floor(item, model_book, config)
 
 
-def portals_floor_pair(item, config, db, session, token):
-    collection_book = cached_book(
-        db, session, token, collection=item["name"],
-        collection_id=item.get("collection_id") or None, config=config,
-    )
+def portals_model_floor(item, config, db, session, token):
     model_book = []
     if item.get("model"):
         model_book = cached_book(
@@ -369,28 +358,25 @@ def portals_floor_pair(item, config, db, session, token):
             collection_id=item.get("collection_id") or None,
             model=item["model"], config=config,
         )
-    return comparable_floor_pair(item, collection_book, model_book, config)
+    return comparable_model_floor(item, model_book, config)
 
 
-def mrkt_floor_pair(item, config, db, session, token):
+def mrkt_model_floor(item, config, db, session, token):
     from mrkt_watch import cached_book as mrkt_cached_book
 
-    collection_book = mrkt_cached_book(
-        db, session, token, collection=item["name"], config=config,
-    )
     model_book = []
     if item.get("model"):
         model_book = mrkt_cached_book(
             db, session, token, collection=item["name"],
             model=item["model"], config=config,
         )
-    return comparable_floor_pair(item, collection_book, model_book, config)
+    return comparable_model_floor(item, model_book, config)
 
 
 def add_portals_floor(
         item, result, config, secrets, db, *, base_market="Tonnel",
         portals_session=None, portals_token=None, mrkt_session=None, mrkt_token=None):
-    """Attach model and collection floors from every available marketplace."""
+    """Attach exact-model floors from every available marketplace."""
     if result is None:
         return None
     enriched = dict(result)
@@ -398,11 +384,8 @@ def add_portals_floor(
     stats = {}
 
     try:
-        model_floor, collection_floor = tonnel_floor_pair(item, enriched, config, db)
-        floors.append({
-            "market": "Tonnel", "model_floor": model_floor,
-            "collection_floor": collection_floor,
-        })
+        model_floor = tonnel_model_floor(item, enriched, config, db)
+        floors.append({"market": "Tonnel", "model_floor": model_floor})
     except (RuntimeError, SourceRateLimited):
         pass
 
@@ -413,13 +396,10 @@ def add_portals_floor(
     def collect_portals(session):
         nonlocal stats
         try:
-            model_floor, collection_floor = portals_floor_pair(
+            model_floor = portals_model_floor(
                 item, config, db, session, token
             )
-            floors.append({
-                "market": "Portals", "model_floor": model_floor,
-                "collection_floor": collection_floor,
-            })
+            floors.append({"market": "Portals", "model_floor": model_floor})
         except (RuntimeError, PortalsRateLimited):
             pass
         try:
@@ -444,13 +424,10 @@ def add_portals_floor(
 
         def collect_mrkt(session):
             try:
-                model_floor, collection_floor = mrkt_floor_pair(
+                model_floor = mrkt_model_floor(
                     item, config, db, session, token
                 )
-                floors.append({
-                    "market": "MRKT", "model_floor": model_floor,
-                    "collection_floor": collection_floor,
-                })
+                floors.append({"market": "MRKT", "model_floor": model_floor})
             except (RuntimeError, MrktAuthError, MrktRateLimited):
                 pass
 
