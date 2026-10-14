@@ -19,6 +19,7 @@ from bot import ROOT, telegram
 from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
+from runtime_settings import effective_config
 
 TONNEL_URL = "https://gifts2.tonnel.network/api/pageGifts"
 EVENTS_URL = "https://gifts.coffin.meme/api/marketplace/events"
@@ -593,6 +594,7 @@ def collection_enabled(name, config):
 
 
 def process_event(event, config, secrets, db, send=True):
+    config = effective_config(config, db)
     event_id = event.get("eventId") if isinstance(event, dict) else None
     if not isinstance(event_id, str) or not event_id:
         return False
@@ -731,6 +733,7 @@ def load_rate(db, max_age=3600):
 
 
 def run_cycle(config, secrets, db, send=False):
+    config = effective_config(config, db)
     rate = load_rate(db)
     db.execute("CREATE TABLE IF NOT EXISTS tonnel_alerts (id TEXT PRIMARY KEY, price TEXT, sent REAL)")
     total = candidates = delivered = 0

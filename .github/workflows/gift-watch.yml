@@ -79,6 +79,8 @@ jobs:
         run: |
           set -u
           mrkt_pid=""
+          python -u settings_bot.py --duration "${STREAM_SECONDS}" &
+          settings_pid=$!
           python -u portals_watch.py --send --duration "${STREAM_SECONDS}" &
           portals_pid=$!
           python -u tonnel_watch.py --send --stream-seconds "${STREAM_SECONDS}" &
@@ -88,13 +90,13 @@ jobs:
             mrkt_pid=$!
           fi
           status=0
-          wait -n "${portals_pid}" "${tonnel_pid}" || status=$?
+          wait -n "${settings_pid}" "${portals_pid}" "${tonnel_pid}" || status=$?
           if [ -n "${mrkt_pid}" ]; then
             kill "${mrkt_pid}" 2>/dev/null || true
             wait "${mrkt_pid}" 2>/dev/null || true
           fi
-          kill "${portals_pid}" "${tonnel_pid}" 2>/dev/null || true
-          wait "${portals_pid}" "${tonnel_pid}" 2>/dev/null || true
+          kill "${settings_pid}" "${portals_pid}" "${tonnel_pid}" 2>/dev/null || true
+          wait "${settings_pid}" "${portals_pid}" "${tonnel_pid}" 2>/dev/null || true
           exit "${status}"
 
       - name: Save monitor state
