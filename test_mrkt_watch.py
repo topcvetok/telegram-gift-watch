@@ -158,7 +158,10 @@ class MrktTests(unittest.TestCase):
 
         with patch.object(watch, "load_rate", return_value=Decimal("100")), \
                 patch.object(watch, "cached_book", side_effect=book), \
-                patch.object(watch, "attach_cross_market_floors", side_effect=lambda *args: args[1]), \
+                patch.object(
+                    watch, "attach_cross_market_floors",
+                    side_effect=lambda *args, **kwargs: args[1],
+                ), \
                 patch.object(watch, "telegram") as send:
             self.assertTrue(watch.process_event(
                 event, self.config, {}, db, Mock(), "token", send=True

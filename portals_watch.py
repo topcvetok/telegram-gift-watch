@@ -22,13 +22,16 @@ from market_data import (
     record_market_activity,
 )
 from tonnel_watch import (
+    SourceRateLimited,
     allowed_backdrop,
     apply_sales_evidence,
     best_score,
     decimal,
     eligible,
     fetch_collection,
+    load_collection_book,
     load_rate,
+    load_variant_books,
     slug,
 )
 
@@ -325,30 +328,139 @@ def basis_book(db, session, token, item, result, config):
     return book, minimum, spread
 
 
-def add_portals_floor(item, result, config, secrets, db, *, base_market="Tonnel"):
-    """Add a comparable Portals floor without ever blocking the source alert."""
+def comparable_floor_pair(item, collection_book, model_book, config):
+    """Return stable floors for this exact model and for the whole collection."""
+    collection_floor = stable_floor(
+        item, collection_book, config["min_comparables"],
+        config["floor_cluster_max_spread_fraction"],
+    )
+    model_floor = None
+    if item.get("model"):
+        model_floor = stable_floor(
+            item, model_book, config["variant_min_comparables"],
+            config["variant_floor_cluster_max_spread_fraction"],
+        )
+    return model_floor, collection_floor
+
+
+def tonnel_floor_pair(item, result, config, db):
+    tonnel_config = dict(config)
+    tonnel_config.setdefault("collection_floor_cache_seconds", 20)
+    tonnel_config.setdefault("variant_cache_seconds", 20)
+    tonnel_config.setdefault("variant_workers", 1)
+    collection_book = load_collection_book(db, item["name"], tonnel_config)
+    model_item = dict(item, backdrop=None)
+    model_books = load_variant_books(
+        db, item["name"], [model_item], result["rate"], tonnel_config, [1]
+    )
+    model_book = model_books.get(("model", item.get("model")), [])
+    return comparable_floor_pair(item, collection_book, model_book, config)
+
+
+def portals_floor_pair(item, config, db, session, token):
+    collection_book = cached_book(
+        db, session, token, collection=item["name"],
+        collection_id=item.get("collection_id") or None, config=config,
+    )
+    model_book = []
+    if item.get("model"):
+        model_book = cached_book(
+            db, session, token, collection=item["name"],
+            collection_id=item.get("collection_id") or None,
+            model=item["model"], config=config,
+        )
+    return comparable_floor_pair(item, collection_book, model_book, config)
+
+
+def mrkt_floor_pair(item, config, db, session, token):
+    from mrkt_watch import cached_book as mrkt_cached_book
+
+    collection_book = mrkt_cached_book(
+        db, session, token, collection=item["name"], config=config,
+    )
+    model_book = []
+    if item.get("model"):
+        model_book = mrkt_cached_book(
+            db, session, token, collection=item["name"],
+            model=item["model"], config=config,
+        )
+    return comparable_floor_pair(item, collection_book, model_book, config)
+
+
+def add_portals_floor(
+        item, result, config, secrets, db, *, base_market="Tonnel",
+        portals_session=None, portals_token=None, mrkt_session=None, mrkt_token=None):
+    """Attach model and collection floors from every available marketplace."""
     if result is None:
         return None
     enriched = dict(result)
-    floors = [{"market": base_market, "floor": enriched.get("next_floor")}]
-    token = str(secrets.get("portals_token", "")).strip()
+    floors = []
     stats = {}
-    with requests.Session(
-        impersonate="chrome",
-        curl_options={CurlOpt.HTTP_VERSION: CurlHttpVersion.V1_1},
-    ) as session:
+
+    try:
+        model_floor, collection_floor = tonnel_floor_pair(item, enriched, config, db)
+        floors.append({
+            "market": "Tonnel", "model_floor": model_floor,
+            "collection_floor": collection_floor,
+        })
+    except (RuntimeError, SourceRateLimited):
+        pass
+
+    token = str(
+        portals_token if portals_token is not None else secrets.get("portals_token", "")
+    ).strip()
+
+    def collect_portals(session):
+        nonlocal stats
         try:
-            book, minimum, spread = basis_book(db, session, token, item, enriched, config)
-            floor = stable_floor(item, book, minimum, spread)
-            if floor is not None:
-                floors.append({"market": "Portals", "floor": floor})
+            model_floor, collection_floor = portals_floor_pair(
+                item, config, db, session, token
+            )
+            floors.append({
+                "market": "Portals", "model_floor": model_floor,
+                "collection_floor": collection_floor,
+            })
         except (RuntimeError, PortalsRateLimited):
             pass
         try:
             stats = collection_stats(db, session, token, item["name"], config)
         except (RuntimeError, PortalsRateLimited):
             pass
-    enriched["market_floors"] = [entry for entry in floors if entry["floor"] is not None]
+
+    if portals_session is None:
+        with requests.Session(
+            impersonate="chrome",
+            curl_options={CurlOpt.HTTP_VERSION: CurlHttpVersion.V1_1},
+        ) as session:
+            collect_portals(session)
+    else:
+        collect_portals(portals_session)
+
+    token = str(
+        mrkt_token if mrkt_token is not None else secrets.get("mrkt_token", "")
+    ).strip()
+    if token:
+        from mrkt_watch import MrktAuthError, MrktRateLimited
+
+        def collect_mrkt(session):
+            try:
+                model_floor, collection_floor = mrkt_floor_pair(
+                    item, config, db, session, token
+                )
+                floors.append({
+                    "market": "MRKT", "model_floor": model_floor,
+                    "collection_floor": collection_floor,
+                })
+            except (RuntimeError, MrktAuthError, MrktRateLimited):
+                pass
+
+        if mrkt_session is None:
+            with requests.Session(impersonate="chrome") as session:
+                collect_mrkt(session)
+        else:
+            collect_mrkt(mrkt_session)
+
+    enriched["market_floors"] = floors
     enriched = complete_market_floors(item, enriched, db, config)
     return apply_activity_evidence(
         item, enriched, db, config,
@@ -442,23 +554,9 @@ def process_listing(item, config, secrets, db, session, token, send=True):
     result = apply_sales_evidence(item, result, db, score_config)
     if result is None:
         return False
-    floors = [{"market": "Portals", "floor": result["next_floor"]}]
-    try:
-        floor = tonnel_comparable_floor(item, result, config)
-        if floor is not None:
-            floors.insert(0, {"market": "Tonnel", "floor": floor})
-    except RuntimeError:
-        pass
-    result["market_floors"] = floors
-    stats = {}
-    try:
-        stats = collection_stats(db, session, token, item["name"], config)
-    except (RuntimeError, PortalsRateLimited):
-        pass
-    result = complete_market_floors(item, result, db, config)
-    result = apply_activity_evidence(
-        item, result, db, config,
-        portals_sales_24h=stats.get("sales_24h_count", 0),
+    result = add_portals_floor(
+        item, result, config, secrets, db, base_market="Portals",
+        portals_session=session, portals_token=token,
     )
     return send_if_new_price(item, result, config, secrets, db, send)
 

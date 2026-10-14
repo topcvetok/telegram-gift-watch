@@ -92,6 +92,36 @@ class PortalsTests(unittest.TestCase):
         self.assertEqual(watch.stable_floor(item, stable, 5, 0.08), Decimal("12.02"))
         self.assertIsNone(watch.stable_floor(item, unstable, 3, 0.08))
 
+    def test_cross_market_snapshot_has_model_and_collection_floors(self):
+        db = sqlite3.connect(":memory:")
+        item = watch.portals_item(raw_gift())
+        result = {"rate": Decimal("100")}
+        with patch.object(
+                    watch, "tonnel_floor_pair",
+                    return_value=(Decimal("11"), Decimal("7")),
+                ), patch.object(
+                    watch, "portals_floor_pair",
+                    return_value=(Decimal("12"), Decimal("7.2")),
+                ), patch.object(
+                    watch, "mrkt_floor_pair",
+                    return_value=(Decimal("11.8"), Decimal("7.4")),
+                ), patch.object(
+                    watch, "collection_stats", return_value={"sales_24h_count": 5},
+                ), patch("market_data._cached_catalog", return_value={"gifts": []}):
+            enriched = watch.add_portals_floor(
+                item, result, self.config, {"mrkt_token": "token"}, db,
+                portals_session=Mock(), mrkt_session=Mock(),
+            )
+        self.assertEqual(
+            [
+                (row["market"], row["model_floor"], row["collection_floor"])
+                for row in enriched["market_floors"]
+            ],
+            [("Tonnel", Decimal("11"), Decimal("7")),
+             ("Portals", Decimal("12"), Decimal("7.2")),
+             ("MRKT", Decimal("11.8"), Decimal("7.4"))],
+        )
+
     def test_cached_book_restores_decimal_prices(self):
         db = sqlite3.connect(":memory:")
         session = Mock()
@@ -115,8 +145,10 @@ class PortalsTests(unittest.TestCase):
             "quality": "нормальный", "price": Decimal("8"), "rate": Decimal("100"),
             "basis": "модель: Watcher", "next_floor": Decimal("12"),
             "market_floors": [
-                {"market": "Tonnel", "floor": Decimal("11.5")},
-                {"market": "Portals", "floor": Decimal("12")},
+                {"market": "Tonnel", "model_floor": Decimal("11.5"),
+                 "collection_floor": Decimal("7")},
+                {"market": "Portals", "model_floor": Decimal("12"),
+                 "collection_floor": Decimal("7.2")},
             ],
             "liquidity": "средняя", "collection_sales_24h": 4,
             "basis_sales_24h": 3,
@@ -129,7 +161,9 @@ class PortalsTests(unittest.TestCase):
         text = watch.format_alert(item, result, self.config)
         self.assertIn("СРЕДНИЙ РИСК: оффер на Portals", text)
         self.assertIn("<b>Устойчивые floor:</b>", text)
-        self.assertIn("Tonnel — 11.500 TON", text)
+        self.assertIn("<b>Tonnel</b>", text)
+        self.assertIn("• модель: 11.500 TON", text)
+        self.assertIn("• коллекция: 7.000 TON", text)
         self.assertNotIn("История продаж:", text)
         self.assertNotIn("https://t.me/nft/evileye-42", text)
         self.assertNotIn("Открыть оффер", text)
@@ -177,11 +211,23 @@ class PortalsTests(unittest.TestCase):
         def book(*args, **kwargs):
             return collection[:3] if kwargs.get("model") or kwargs.get("backdrop") else collection
 
+        def cross_floors(_item, result, *_args, **_kwargs):
+            result["market_floors"] = [
+                {"market": "Tonnel", "model_floor": Decimal("11"),
+                 "collection_floor": Decimal("7")},
+                {"market": "Portals", "model_floor": Decimal("12"),
+                 "collection_floor": Decimal("7.2")},
+                {"market": "MRKT", "model_floor": Decimal("11.8"),
+                 "collection_floor": Decimal("7.4")},
+            ]
+            result["activity_sales_24h"] = 82
+            result["activity_24h"] = 82
+            result["liquidity"] = "высокая"
+            return result
+
         with patch.object(watch, "load_rate", return_value=Decimal("100")), \
                 patch.object(watch, "cached_book", side_effect=book), \
-                patch.object(watch, "tonnel_comparable_floor", return_value=Decimal("11")), \
-                patch.object(watch, "collection_stats", return_value={"sales_24h_count": 82}), \
-                patch.object(watch, "complete_market_floors", side_effect=lambda _i, r, *_: r), \
+                patch.object(watch, "add_portals_floor", side_effect=cross_floors), \
                 patch.object(watch, "telegram") as send:
             self.assertTrue(watch.process_listing(
                 item, self.config, {}, db, Mock(), "", send=True
@@ -189,7 +235,8 @@ class PortalsTests(unittest.TestCase):
         self.assertEqual(send.call_count, 1)
         message = send.call_args.args[1]
         self.assertIn("оффер на Portals", message)
-        self.assertIn("Tonnel — 11.000 TON", message)
+        self.assertIn("• модель: 11.000 TON", message)
+        self.assertIn("• коллекция: 7.000 TON", message)
         self.assertIn("активность за 24 ч: 82", message)
 
     def test_feed_records_listing_and_price_change_once(self):

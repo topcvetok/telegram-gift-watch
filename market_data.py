@@ -84,28 +84,44 @@ def catalog_collection_floors(item, db, config):
 
 
 def complete_market_floors(item, result, db, config):
-    """Keep direct stable floors and fill collection gaps from the public catalog."""
+    """Order direct model/collection floors and fill collection gaps from the catalog."""
     if result is None:
         return None
     enriched = dict(result)
     direct = {}
     for entry in enriched.get("market_floors") or []:
         market = str(entry.get("market") or "")
-        if market in MARKETS and entry.get("floor") is not None:
-            direct[market] = dict(entry, verified=entry.get("verified", True))
+        if market not in MARKETS:
+            continue
+        row = direct.setdefault(market, {"market": market})
+        for scope in ("model", "collection"):
+            key = f"{scope}_floor"
+            if entry.get(key) is not None:
+                row[key] = entry[key]
+                row[f"{scope}_verified"] = entry.get(
+                    f"{scope}_verified", entry.get("verified", True)
+                )
+        # Accept the previous one-floor shape while rolling cached state forward.
+        if entry.get("floor") is not None:
+            scope = entry.get("scope") or enriched.get("basis_scope", "collection")
+            if scope in ("model", "collection"):
+                row[f"{scope}_floor"] = entry["floor"]
+                row[f"{scope}_verified"] = entry.get("verified", True)
 
-    external = {}
-    if enriched.get("basis_scope", "collection") == "collection":
-        external = catalog_collection_floors(item, db, config)
+    external = catalog_collection_floors(item, db, config)
 
     floors = []
     for market in MARKETS:
-        if market in direct:
-            floors.append(direct[market])
-        elif external.get(market) is not None:
-            floors.append({"market": market, "floor": external[market], "verified": False})
+        row = direct.get(market, {"market": market})
+        row.setdefault("model_floor", None)
+        row.setdefault("model_verified", False)
+        if row.get("collection_floor") is None and external.get(market) is not None:
+            row["collection_floor"] = external[market]
+            row["collection_verified"] = False
         else:
-            floors.append({"market": market, "floor": None, "verified": False})
+            row.setdefault("collection_floor", None)
+            row.setdefault("collection_verified", False)
+        floors.append(row)
     enriched["market_floors"] = floors
     return enriched
 

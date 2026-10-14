@@ -21,23 +21,28 @@ def format_market_alert(item, result, *, market):
     rate = result["rate"]
     floors = list(result.get("market_floors") or [])
     if not floors:
-        floors = [{"market": market, "floor": result["next_floor"]}]
+        scope = result.get("basis_scope", "collection")
+        floors = [{"market": market, f"{scope}_floor": result["next_floor"]}]
 
     floor_lines = []
     for entry in floors:
-        floor = entry.get("floor")
-        if floor is None:
-            floor_lines.append(
-                f"{escape(str(entry.get('market') or '?'))} — нет данных по этому основанию"
+        market_name = escape(str(entry.get("market") or "?"))
+        floor_lines.append(f"<b>{market_name}</b>")
+        for scope, label in (("model", "модель"), ("collection", "коллекция")):
+            floor = entry.get(f"{scope}_floor")
+            if floor is None:
+                floor_lines.append(f"  • {label}: нет устойчивых данных")
+                continue
+            difference = floor - price
+            percent = difference / price * 100 if price > 0 else 0
+            verified = entry.get(
+                f"{scope}_verified", entry.get("verified", True)
             )
-            continue
-        difference = floor - price
-        percent = difference / price * 100 if price > 0 else 0
-        note = "" if entry.get("verified", True) else " · внешний floor"
-        floor_lines.append(
-            f"{escape(str(entry.get('market') or '?'))} — {_ton(floor)} "
-            f"({difference:+.3f} TON / {percent:+.1f}%{note})"
-        )
+            note = "" if verified else " · внешний floor"
+            floor_lines.append(
+                f"  • {label}: {_ton(floor)} "
+                f"({difference:+.3f} TON / {percent:+.1f}%{note})"
+            )
     if not floor_lines:
         floor_lines.append("Нет подтверждённого устойчивого floor")
 

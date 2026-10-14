@@ -15,7 +15,7 @@ except ImportError:
 
 from bot import ROOT, telegram
 from alert_format import format_market_alert
-from market_data import complete_market_floors, record_market_activity
+from market_data import record_market_activity
 from tonnel_watch import apply_sales_evidence, best_score, decimal, load_rate, slug
 
 API_URL = "https://api.tgmrkt.io/api/v1"
@@ -265,23 +265,16 @@ def format_alert(item, result, config):
     return format_market_alert(item, result, market="MRKT")
 
 
-def attach_cross_market_floors(item, result, config, secrets, db):
+def attach_cross_market_floors(
+        item, result, config, secrets, db, *, session=None, token=None):
     if result is None:
         return None
-    from portals_watch import add_portals_floor, tonnel_comparable_floor
+    from portals_watch import add_portals_floor
 
-    enriched = add_portals_floor(
-        item, result, config, secrets, db, base_market="MRKT"
+    return add_portals_floor(
+        item, result, config, secrets, db, base_market="MRKT",
+        mrkt_session=session, mrkt_token=token,
     )
-    try:
-        floor = tonnel_comparable_floor(item, enriched, config)
-        if floor is not None:
-            enriched.setdefault("market_floors", []).insert(
-                0, {"market": "Tonnel", "floor": floor}
-            )
-    except RuntimeError:
-        pass
-    return complete_market_floors(item, enriched, db, config)
 
 
 def send_if_new_price(item, result, config, secrets, db, send=True):
@@ -356,7 +349,9 @@ def process_event(event, config, secrets, db, session, token, send=True):
                 score_config = mrkt_scoring_config(config)
                 result = best_score(item, collection_book, variant_books, rate, score_config)
                 result = apply_sales_evidence(item, result, db, score_config)
-                result = attach_cross_market_floors(item, result, config, secrets, db)
+                result = attach_cross_market_floors(
+                    item, result, config, secrets, db, session=session, token=token
+                )
                 if result is not None:
                     delivered = send_if_new_price(item, result, config, secrets, db, send)
     now = time.time()
