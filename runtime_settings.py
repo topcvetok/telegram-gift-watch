@@ -14,6 +14,8 @@ def ensure_settings_table(db):
         "CREATE TABLE IF NOT EXISTS runtime_settings "
         "(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated REAL NOT NULL)"
     )
+    # Release the initial schema write before any marketplace performs network I/O.
+    db.commit()
 
 
 def _rubles(value, label):

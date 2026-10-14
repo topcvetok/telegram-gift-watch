@@ -173,7 +173,7 @@ def run(config, secrets, db, duration=3300):
     deadline = time.monotonic() + max(1, int(duration))
     offset = None
     while time.monotonic() < deadline:
-        payload = {"timeout": 15, "limit": 20, "allowed_updates": ["message", "callback_query"]}
+        payload = {"timeout": 15, "limit": 20}
         if offset is not None:
             payload["offset"] = offset
         try:
