@@ -66,10 +66,10 @@ jobs:
         env:
           MRKT_TOKEN: ${{ secrets.MRKT_TOKEN }}
         run: |
-          python -u tonnel_watch.py --once --send
-          python -u portals_watch.py --once --send
+          python -u tonnel_watch.py --once --send || echo "::warning::Tonnel initial check failed; the live listener will retry"
+          python -u portals_watch.py --once --send || echo "::warning::Portals initial check failed; the live listener will retry"
           if [ -n "${MRKT_TOKEN}" ]; then
-            python -u mrkt_watch.py --once --send --fail-fast
+            python -u mrkt_watch.py --once --send --fail-fast || echo "::warning::MRKT initial check failed; the live listener will retry"
           fi
 
       - name: Listen for new listings in real time
