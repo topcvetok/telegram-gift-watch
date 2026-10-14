@@ -312,20 +312,21 @@ class TonnelScoringTests(unittest.TestCase):
                 watch.apply_sales_evidence(item, result, db, self.config, now)
             )
 
-    def test_quality_levels_use_real_sales_and_liquidity(self):
+    def test_sales_confirmation_and_liquidity_do_not_assign_risk(self):
         now = watch.time.time()
         item = gift(1, 5.0)
         floor = [gift(i, p) for i, p in enumerate([7.0, 7.1, 7.2, 7.3, 7.4], 2)]
         result = watch.best_score(item, floor, {}, Decimal("100"), self.config)
         with sqlite3.connect(":memory:") as db:
-            risky = watch.apply_sales_evidence(item, result, db, self.config, now)
-            self.assertEqual(risky["quality"], "рискованный")
+            unconfirmed = watch.apply_sales_evidence(item, result, db, self.config, now)
+            self.assertNotIn("quality", unconfirmed)
+            self.assertFalse(unconfirmed["sales_confirmed"])
             for index in range(8):
                 watch.record_sale(sale_event(index + 100, 7.0, now - index), db)
-            strong = watch.apply_sales_evidence(item, result, db, self.config, now)
-        self.assertEqual(strong["quality"], "сильный")
-        self.assertEqual(strong["liquidity"], "высокая")
-        self.assertTrue(strong["sales_confirmed"])
+            confirmed = watch.apply_sales_evidence(item, result, db, self.config, now)
+        self.assertNotIn("quality", confirmed)
+        self.assertEqual(confirmed["liquidity"], "высокая")
+        self.assertTrue(confirmed["sales_confirmed"])
 
     def test_stream_accepts_collection_not_in_seed_list(self):
         config = dict(self.config)

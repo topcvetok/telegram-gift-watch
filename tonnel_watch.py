@@ -496,21 +496,6 @@ def apply_sales_evidence(item, result, db, config, now=None):
     else:
         enriched["liquidity"] = "низкая"
 
-    strong_sales = int(config.get("strong_signal_min_basis_sales_24h", 5))
-    strong_discount = decimal(config.get("strong_signal_min_discount_fraction", 0.25))
-    strong_roi = decimal(config.get("strong_signal_min_roi_fraction", 0.25))
-    if (
-        confirmed
-        and basis_sales >= strong_sales
-        and collection_sales >= high
-        and enriched["discount"] >= strong_discount
-        and enriched["roi"] >= strong_roi
-    ):
-        enriched["quality"] = "сильный"
-    elif confirmed:
-        enriched["quality"] = "нормальный"
-    else:
-        enriched["quality"] = "рискованный"
     return enriched
 
 

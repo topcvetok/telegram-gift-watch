@@ -48,9 +48,6 @@ class MrktTests(unittest.TestCase):
             "sales_confirmation_min_count": 3,
             "liquidity_medium_sales_24h": 3,
             "liquidity_high_sales_24h": 8,
-            "strong_signal_min_basis_sales_24h": 5,
-            "strong_signal_min_discount_fraction": 0.25,
-            "strong_signal_min_roi_fraction": 0.25,
         }
 
     def test_current_api_contract(self):
@@ -81,7 +78,7 @@ class MrktTests(unittest.TestCase):
     def test_direct_link_is_kept_for_button(self):
         item = watch.mrkt_item(raw_gift())
         result = {
-            "quality": "рискованный", "price": Decimal("10"), "rate": Decimal("100"),
+            "price": Decimal("10"), "rate": Decimal("100"),
             "basis": "модель: Watcher", "next_floor": Decimal("13"),
             "discount": Decimal("0.23"), "liquidity": "низкая",
             "collection_sales_24h": 0, "basis_sales_24h": 0,
@@ -121,7 +118,7 @@ class MrktTests(unittest.TestCase):
         db = sqlite3.connect(":memory:")
         item = watch.mrkt_item(raw_gift())
         result = {
-            "quality": "рискованный", "price": Decimal("10"), "rate": Decimal("100"),
+            "price": Decimal("10"), "rate": Decimal("100"),
             "basis": "вся коллекция", "next_floor": Decimal("13"),
             "discount": Decimal("0.23"), "liquidity": "низкая",
             "collection_sales_24h": 0, "basis_sales_24h": 0,

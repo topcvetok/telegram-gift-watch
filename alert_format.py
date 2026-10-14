@@ -3,20 +3,12 @@
 from html import escape
 
 
-RISK_LABELS = {
-    "сильный": ("🟢", "НИЗКИЙ РИСК"),
-    "нормальный": ("🟡", "СРЕДНИЙ РИСК"),
-    "рискованный": ("🔴", "ВЫСОКИЙ РИСК"),
-}
-
-
 def _ton(value):
     return f"{value:.3f} TON"
 
 
 def format_market_alert(item, result, *, market):
     """Render the compact evidence-first alert requested by the user."""
-    icon, risk = RISK_LABELS.get(result.get("quality"), RISK_LABELS["рискованный"])
     price = result["price"]
     rate = result["rate"]
     floors = list(result.get("market_floors") or [])
@@ -57,7 +49,7 @@ def format_market_alert(item, result, *, market):
         activity_line += f" · прочие события: {other}"
 
     lines = [
-        f"<b>{icon} {risk}: оффер на {escape(market)}</b>",
+        f"<b>оффер на {escape(market)}</b>",
         "",
         f"💲 <b>ЦЕНА:</b> {_ton(price)} ≈ {price * rate:.0f} ₽",
         "",

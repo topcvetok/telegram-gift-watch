@@ -48,9 +48,6 @@ class PortalsTests(unittest.TestCase):
             "sales_confirmation_min_count": 3,
             "liquidity_medium_sales_24h": 3,
             "liquidity_high_sales_24h": 8,
-            "strong_signal_min_basis_sales_24h": 5,
-            "strong_signal_min_discount_fraction": 0.25,
-            "strong_signal_min_roi_fraction": 0.25,
         }
 
     def test_parses_public_listing_and_traits(self):
@@ -139,7 +136,7 @@ class PortalsTests(unittest.TestCase):
     def test_alert_uses_requested_format_without_visible_links_or_history(self):
         item = watch.portals_item(raw_gift())
         result = {
-            "quality": "нормальный", "price": Decimal("8"), "rate": Decimal("100"),
+            "price": Decimal("8"), "rate": Decimal("100"),
             "basis": "модель: Watcher", "next_floor": Decimal("12"),
             "market_floors": [
                 {"market": "Tonnel", "model_floor": Decimal("11.5"),
@@ -156,7 +153,8 @@ class PortalsTests(unittest.TestCase):
             "resale": Decimal("11.99"), "profit_rub": Decimal("350"),
         }
         text = watch.format_alert(item, result, self.config)
-        self.assertIn("СРЕДНИЙ РИСК: оффер на Portals", text)
+        self.assertIn("<b>оффер на Portals</b>", text)
+        self.assertNotIn("РИСК", text)
         self.assertIn("<b>Устойчивые floor:</b>", text)
         self.assertIn("<b>Tonnel</b>", text)
         self.assertIn("• модель: 11.500 TON", text)
@@ -173,7 +171,7 @@ class PortalsTests(unittest.TestCase):
         db = sqlite3.connect(":memory:")
         item = watch.portals_item(raw_gift())
         result = {
-            "quality": "рискованный", "price": Decimal("8"), "rate": Decimal("100"),
+            "price": Decimal("8"), "rate": Decimal("100"),
             "basis": "вся коллекция", "next_floor": Decimal("12"),
             "liquidity": "низкая", "collection_sales_24h": 0,
             "basis_sales_24h": 0, "recent_sales": [],
