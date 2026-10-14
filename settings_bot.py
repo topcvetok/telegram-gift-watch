@@ -7,11 +7,7 @@ import sys
 import time
 
 from bot import ROOT, request_json
-from runtime_settings import effective_config, max_purchase_limit, set_setting
-
-
-MAX_PRICE_PRESETS = (1000, 2000, 3000, 4000)
-MIN_FLOOR_PRESETS = (500, 1000, 1500, 2000)
+from runtime_settings import SETTING_LABELS, effective_config, max_purchase_limit, set_setting
 
 
 def api(secrets, method, payload=None):
@@ -30,9 +26,8 @@ def settings_text(config, db):
         "<b>Настройки Gift Watch</b>\n\n"
         f"💰 Максимальная стоимость: <b>{format_rubles(current['max_lot_rub'])} ₽</b>\n"
         f"📊 Минимальный floor: <b>{format_rubles(current['min_floor_rub'])} ₽</b>\n\n"
-        "Нажми нужное значение ниже — оно сразу применится ко всем площадкам.\n\n"
-        "Точное значение: <code>/maxprice 2500</code> или "
-        "<code>/minfloor 1200</code>."
+        "Нажми кнопку и отправь свою цену обычным сообщением. "
+        "Новое значение сразу применится ко всем площадкам."
     )
 
 
@@ -41,24 +36,18 @@ def format_rubles(value):
 
 
 def settings_keyboard(config, db):
-    limit = max_purchase_limit(config)
-    max_values = [value for value in MAX_PRICE_PRESETS if limit is None or value <= limit]
-    current = effective_config(config, db)
-    rows = []
-    for value in max_values:
-        marker = "✅" if value == current["max_lot_rub"] else "💰"
-        rows.append([{
-            "text": f"{marker} Максимальная цена — {format_rubles(value)} ₽",
-            "callback_data": f"setting:max_lot_rub:{value}",
-        }])
-    for value in MIN_FLOOR_PRESETS:
-        marker = "✅" if value == current["min_floor_rub"] else "📊"
-        rows.append([{
-            "text": f"{marker} Минимальный floor — {format_rubles(value)} ₽",
-            "callback_data": f"setting:min_floor_rub:{value}",
-        }])
-    rows.append([{"text": "🔄 Обновить настройки", "callback_data": "settings:refresh"}])
-    return {"inline_keyboard": rows}
+    effective_config(config, db)
+    return {"inline_keyboard": [
+        [{
+            "text": "💰 Ввести максимальную стоимость",
+            "callback_data": "settings:input:max_lot_rub",
+        }],
+        [{
+            "text": "📊 Ввести минимальный floor",
+            "callback_data": "settings:input:min_floor_rub",
+        }],
+        [{"text": "🔄 Обновить настройки", "callback_data": "settings:refresh"}],
+    ]}
 
 
 def show_settings(secrets, config, db, *, message_id=None):
@@ -85,6 +74,65 @@ def send_text(secrets, text):
     })
 
 
+def send_input_prompt(secrets, key, config):
+    if key == "max_lot_rub":
+        limit = max_purchase_limit(config)
+        limit_text = f" от 1 до {format_rubles(limit)} ₽" if limit is not None else ""
+        text = f"Введи максимальную стоимость подарка{limit_text}. Например: <b>2500</b>"
+    else:
+        text = "Введи минимальный floor в рублях. Например: <b>1200</b>"
+    return api(secrets, "sendMessage", {
+        "chat_id": secrets["chat_id"],
+        "text": text,
+        "parse_mode": "HTML",
+        "reply_markup": {
+            "force_reply": True,
+            "input_field_placeholder": "Введи сумму в рублях",
+        },
+        "link_preview_options": {"is_disabled": True},
+    })
+
+
+def ensure_input_table(db):
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS settings_input "
+        "(chat_id TEXT PRIMARY KEY, setting_key TEXT NOT NULL)"
+    )
+    db.commit()
+
+
+def begin_input(db, chat_id, key):
+    if key not in SETTING_LABELS:
+        raise ValueError("Неизвестная настройка")
+    ensure_input_table(db)
+    db.execute(
+        "INSERT OR REPLACE INTO settings_input (chat_id, setting_key) VALUES (?, ?)",
+        (str(chat_id), key),
+    )
+    db.commit()
+
+
+def pending_input(db, chat_id):
+    ensure_input_table(db)
+    row = db.execute(
+        "SELECT setting_key FROM settings_input WHERE chat_id=?", (str(chat_id),)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def clear_input(db, chat_id):
+    ensure_input_table(db)
+    db.execute("DELETE FROM settings_input WHERE chat_id=?", (str(chat_id),))
+    db.commit()
+
+
+def normalize_price_text(text):
+    value = str(text or "").strip().replace(" ", "").replace("₽", "")
+    if not value or not value.isdecimal():
+        raise ValueError("Введи цену целым числом в рублях, например: 2500")
+    return value
+
+
 def parse_command(text):
     parts = str(text or "").strip().split()
     if not parts:
@@ -97,6 +145,8 @@ def apply_command(text, config, db):
     command, args = parse_command(text)
     if command in ("/settings", "/start", "/help"):
         return "settings"
+    if command == "/cancel":
+        return "cancel"
     mapping = {"/maxprice": "max_lot_rub", "/minfloor": "min_floor_rub"}
     key = mapping.get(command)
     if key is None:
@@ -111,14 +161,14 @@ def apply_command(text, config, db):
 
 def apply_callback(data, config, db):
     if data == "settings:refresh":
-        return False
+        return "refresh", None
     parts = str(data or "").split(":")
-    if len(parts) != 3 or parts[0] != "setting":
+    if len(parts) != 3 or parts[:2] != ["settings", "input"]:
         raise ValueError("Неизвестная кнопка")
-    key, value = parts[1:]
-    maximum = max_purchase_limit(config) if key == "max_lot_rub" else None
-    set_setting(db, key, value, maximum=maximum)
-    return True
+    key = parts[2]
+    if key not in SETTING_LABELS:
+        raise ValueError("Неизвестная настройка")
+    return "input", key
 
 
 def handle_update(update, secrets, config, db):
@@ -129,11 +179,25 @@ def handle_update(update, secrets, config, db):
         if not isinstance(chat, dict) or str(chat.get("id")) != expected_chat:
             return
         try:
-            action = apply_command(message.get("text"), config, db)
+            text = message.get("text")
+            command, _ = parse_command(text)
+            key = pending_input(db, expected_chat)
+            if key is not None and not command.startswith("/"):
+                value = normalize_price_text(text)
+                maximum = max_purchase_limit(config) if key == "max_lot_rub" else None
+                set_setting(db, key, value, maximum=maximum)
+                clear_input(db, expected_chat)
+                show_settings(secrets, config, db)
+                return
+            action = apply_command(text, config, db)
             if action == "settings":
+                clear_input(db, expected_chat)
+                show_settings(secrets, config, db)
+            elif action == "cancel":
+                clear_input(db, expected_chat)
                 show_settings(secrets, config, db)
         except ValueError as exc:
-            send_text(secrets, str(exc))
+            send_text(secrets, f"{exc}\nПопробуй ещё раз или отправь /cancel.")
         return
 
     callback = update.get("callback_query") if isinstance(update, dict) else None
@@ -145,16 +209,17 @@ def handle_update(update, secrets, config, db):
         return
     callback_id = callback.get("id")
     try:
-        changed = apply_callback(callback.get("data"), config, db)
+        action, key = apply_callback(callback.get("data"), config, db)
         if callback_id:
             api(secrets, "answerCallbackQuery", {
                 "callback_query_id": callback_id,
-                "text": "Настройка сохранена" if changed else "Показываю актуальные настройки",
+                "text": "Теперь введи цену" if action == "input" else "Настройки обновлены",
             })
-        show_settings(
-            secrets, config, db,
-            message_id=callback_message.get("message_id") if changed else None,
-        )
+        if action == "input":
+            begin_input(db, expected_chat, key)
+            send_input_prompt(secrets, key, config)
+        else:
+            show_settings(secrets, config, db)
     except ValueError as exc:
         if callback_id:
             api(secrets, "answerCallbackQuery", {
@@ -169,6 +234,7 @@ def run(config, secrets, db, duration=3300):
         {"command": "settings", "description": "Цена покупки и минимальный floor"},
         {"command": "maxprice", "description": "Максимальная цена в рублях"},
         {"command": "minfloor", "description": "Минимальный floor в рублях"},
+        {"command": "cancel", "description": "Отменить ввод цены"},
     ]})
     deadline = time.monotonic() + max(1, int(duration))
     offset = None
