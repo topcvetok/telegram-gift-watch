@@ -262,9 +262,9 @@ def main():
     args = parser.parse_args()
     config = json.loads((ROOT / "config.json").read_text())
     secrets = json.loads((ROOT / "secrets.json").read_text())
-    with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
+    with sqlite3.connect(ROOT / "settings.sqlite3", timeout=5) as db:
         db.execute("PRAGMA journal_mode=WAL")
-        db.execute("PRAGMA busy_timeout=30000")
+        db.execute("PRAGMA busy_timeout=5000")
         run(config, secrets, db, args.duration)
 
 

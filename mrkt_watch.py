@@ -17,7 +17,7 @@ from bot import ROOT, telegram
 from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
-from runtime_settings import effective_config
+from runtime_settings import activate_settings, active_config
 from tonnel_watch import apply_sales_evidence, best_score, decimal, load_rate, slug
 
 API_URL = "https://api.tgmrkt.io/api/v1"
@@ -191,6 +191,7 @@ def cached_book(db, session, token, *, collection, config, model=None, backdrop=
         "collection TEXT, model TEXT, backdrop TEXT, payload TEXT, checked REAL, "
         "PRIMARY KEY (collection, model, backdrop))"
     )
+    db.commit()
     model_key = model or ""
     backdrop_key = backdrop or ""
     row = db.execute(
@@ -339,6 +340,8 @@ def process_event(event, config, secrets, db, session, token, send=True):
         mark_offer_sold(
             db, "MRKT", raw["id"], secrets, sale_price=sale_price, send=send
         )
+    # Never keep the activity transaction open during floor-book network requests.
+    db.commit()
     delivered = False
     if event_type in ("listing", "changeprice"):
         item = mrkt_item(event.get("gift"), event)
@@ -384,7 +387,7 @@ def fetch_feed(session, token, count=20):
 
 
 def run_cycle(config, secrets, db, session, token, send=True):
-    config = effective_config(config, db)
+    config = active_config(config)
     events = fetch_feed(session, token, int(config.get("mrkt_feed_limit", 20)))
     delivered = 0
     for event in reversed(events):
@@ -431,6 +434,11 @@ def run(config, secrets, db, *, send=True, duration=3300, fail_fast=False):
                 if fail_fast:
                     raise
                 print(f"MRKT: цикл пропущен: {exc}", file=sys.stderr, flush=True)
+            except sqlite3.OperationalError as exc:
+                db.rollback()
+                if fail_fast:
+                    raise
+                print(f"MRKT: база занята, цикл будет повторён: {exc}", file=sys.stderr, flush=True)
             time.sleep(min(delay, max(0, deadline - time.monotonic())))
     return delivered
 
@@ -445,13 +453,17 @@ def main():
     config = json.loads((ROOT / "config.json").read_text())
     secrets = json.loads((ROOT / "secrets.json").read_text())
     duration = 1 if args.once else args.duration
-    with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("PRAGMA busy_timeout=30000")
-        run(
-            config, secrets, db, send=args.send, duration=duration,
-            fail_fast=args.fail_fast,
-        )
+    with sqlite3.connect(ROOT / "settings.sqlite3", timeout=5) as settings_db:
+        settings_db.execute("PRAGMA busy_timeout=5000")
+        settings_db.execute("PRAGMA journal_mode=WAL")
+        activate_settings(settings_db)
+        with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA busy_timeout=30000")
+            run(
+                config, secrets, db, send=args.send, duration=duration,
+                fail_fast=args.fail_fast,
+            )
 
 
 if __name__ == "__main__":

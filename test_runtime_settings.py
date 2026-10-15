@@ -3,7 +3,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from runtime_settings import effective_config, max_purchase_limit, set_setting
+from runtime_settings import (
+    activate_settings,
+    active_config,
+    effective_config,
+    max_purchase_limit,
+    set_setting,
+)
 
 
 class RuntimeSettingsTests(unittest.TestCase):
@@ -17,6 +23,7 @@ class RuntimeSettingsTests(unittest.TestCase):
         }
 
     def tearDown(self):
+        activate_settings(None)
         self.db.close()
 
     def test_overrides_are_persistent_and_leave_source_config_unchanged(self):
@@ -35,6 +42,11 @@ class RuntimeSettingsTests(unittest.TestCase):
     def test_floor_can_be_disabled_with_zero(self):
         set_setting(self.db, "min_floor_rub", 0)
         self.assertEqual(effective_config(self.config, self.db)["min_floor_rub"], 0)
+
+    def test_active_config_reads_dedicated_settings_connection(self):
+        set_setting(self.db, "max_lot_rub", 2750, maximum=4000)
+        activate_settings(self.db)
+        self.assertEqual(active_config(self.config)["max_lot_rub"], 2750)
 
     def test_first_read_releases_schema_lock_for_other_processes(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -22,7 +22,7 @@ from market_data import (
     complete_market_floors,
     record_market_activity,
 )
-from runtime_settings import effective_config
+from runtime_settings import activate_settings, active_config
 from tonnel_watch import (
     SourceRateLimited,
     allowed_backdrop,
@@ -204,6 +204,7 @@ def resolve_collection_id(db, session, token, collection):
         "CREATE TABLE IF NOT EXISTS portals_collections ("
         "name TEXT PRIMARY KEY, collection_id TEXT, checked REAL)"
     )
+    db.commit()
     row = db.execute(
         "SELECT collection_id, checked FROM portals_collections WHERE name=?", (collection,)
     ).fetchone()
@@ -281,6 +282,7 @@ def cached_book(db, session, token, *, collection, config, collection_id=None,
         "collection TEXT, model TEXT, backdrop TEXT, payload TEXT, checked REAL, "
         "PRIMARY KEY (collection, model, backdrop))"
     )
+    db.commit()
     if not collection_id:
         collection_id = resolve_collection_id(db, session, token, collection)
     collection_key = collection_id or collection
@@ -572,7 +574,7 @@ def process_listing(item, config, secrets, db, session, token, send=True):
 
 
 def run_cycle(config, secrets, db, session, token="", send=True):
-    config = effective_config(config, db)
+    config = active_config(config)
     latest = fetch_listings(
         session, token, sort="listed_at desc", limit=int(config.get("portals_feed_limit", 20))
     )
@@ -594,6 +596,8 @@ def run_cycle(config, secrets, db, session, token="", send=True):
             db, f"portals:{key}:{kind}:{item['price']}", "portals", item.get("name"), kind,
             parse_time(item.get("listed_at")) or time.time(),
         )
+        # Release the activity write before Portals/Tonnel/MRKT floor requests.
+        db.commit()
         if old_price is not None and item["price"] > old_price:
             db.execute(
                 "INSERT OR REPLACE INTO portals_seen VALUES (?, ?, ?)",
@@ -640,6 +644,11 @@ def run(config, secrets, db, *, send=True, duration=3300, fail_fast=False):
                 if fail_fast:
                     raise
                 print(f"Portals: цикл пропущен: {exc}", file=sys.stderr, flush=True)
+            except sqlite3.OperationalError as exc:
+                db.rollback()
+                if fail_fast:
+                    raise
+                print(f"Portals: база занята, цикл будет повторён: {exc}", file=sys.stderr, flush=True)
             time.sleep(min(delay, max(0, deadline - time.monotonic())))
     return delivered
 
@@ -653,10 +662,14 @@ def main():
     config = json.loads((ROOT / "config.json").read_text())
     secrets = json.loads((ROOT / "secrets.json").read_text())
     duration = 1 if args.once else args.duration
-    with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
-        db.execute("PRAGMA busy_timeout=30000")
-        db.execute("PRAGMA journal_mode=WAL")
-        run(config, secrets, db, send=args.send, duration=duration, fail_fast=args.once)
+    with sqlite3.connect(ROOT / "settings.sqlite3", timeout=5) as settings_db:
+        settings_db.execute("PRAGMA busy_timeout=5000")
+        settings_db.execute("PRAGMA journal_mode=WAL")
+        activate_settings(settings_db)
+        with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
+            db.execute("PRAGMA busy_timeout=30000")
+            db.execute("PRAGMA journal_mode=WAL")
+            run(config, secrets, db, send=args.send, duration=duration, fail_fast=args.once)
 
 
 if __name__ == "__main__":

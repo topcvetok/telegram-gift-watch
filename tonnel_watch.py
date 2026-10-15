@@ -19,7 +19,7 @@ from bot import ROOT, telegram
 from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
-from runtime_settings import effective_config
+from runtime_settings import activate_settings, active_config
 
 TONNEL_URL = "https://gifts2.tonnel.network/api/pageGifts"
 EVENTS_URL = "https://gifts.coffin.meme/api/marketplace/events"
@@ -123,6 +123,7 @@ def load_variant_books(db, collection, items, rate, config, query_budget):
         "scope TEXT, collection TEXT, trait TEXT, payload TEXT, checked REAL, "
         "PRIMARY KEY (scope, collection, trait))"
     )
+    db.commit()
     budget = decimal(config["max_lot_rub"], "лимит на лот") / rate
     keys = []
     seen = set()
@@ -199,6 +200,7 @@ def load_collection_book(db, collection, config):
         "CREATE TABLE IF NOT EXISTS tonnel_collection_books ("
         "collection TEXT PRIMARY KEY, payload TEXT, checked REAL)"
     )
+    db.commit()
     row = db.execute(
         "SELECT payload, checked FROM tonnel_collection_books WHERE collection=?",
         (collection,),
@@ -393,6 +395,7 @@ def sales_metrics(item, result, db, now=None):
         "event_id TEXT PRIMARY KEY, gift_id TEXT, gift_name TEXT, model TEXT, "
         "backdrop TEXT, symbol TEXT, price TEXT, source TEXT, occurred REAL)"
     )
+    db.commit()
     moment = float(now if now is not None else time.time())
     cutoff = moment - 86400
     name = item.get("name")
@@ -594,7 +597,7 @@ def collection_enabled(name, config):
 
 
 def process_event(event, config, secrets, db, send=True):
-    config = effective_config(config, db)
+    config = active_config(config)
     event_id = event.get("eventId") if isinstance(event, dict) else None
     if not isinstance(event_id, str) or not event_id:
         return False
@@ -620,6 +623,8 @@ def process_event(event, config, secrets, db, send=True):
                 db, "Tonnel", sold_gift["gift_id"], secrets,
                 sale_price=data.get("price"), send=send,
             )
+    # Never hold a marketplace write lock while fetching floor books over the network.
+    db.commit()
     item = event_item(event)
     if item is not None and collection_enabled(item.get("name"), config):
         rate = load_rate(db)
@@ -705,6 +710,7 @@ def stream_events(config, secrets, db, send=True, duration=14340):
             print(f"Поток ждёт лимит Tonnel: {delay} сек.", file=sys.stderr, flush=True)
             time.sleep(min(delay, max(0, deadline - time.monotonic())))
         except Exception as exc:
+            db.rollback()
             print(f"Переподключение к потоку Tonnel: {exc}", file=sys.stderr, flush=True)
             time.sleep(min(3, max(0, deadline - time.monotonic())))
     print(f"Поток завершён; отправлено {delivered} офферов.", flush=True)
@@ -733,7 +739,7 @@ def load_rate(db, max_age=3600):
 
 
 def run_cycle(config, secrets, db, send=False):
-    config = effective_config(config, db)
+    config = active_config(config)
     rate = load_rate(db)
     db.execute("CREATE TABLE IF NOT EXISTS tonnel_alerts (id TEXT PRIMARY KEY, price TEXT, sent REAL)")
     total = candidates = delivered = 0
@@ -789,24 +795,28 @@ def main():
     config = json.loads((ROOT / "config.json").read_text())
     secrets = json.loads((ROOT / "secrets.json").read_text())
     interval = max(60, int(config["poll_seconds"]))
-    with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
-        db.execute("PRAGMA busy_timeout=30000")
-        db.execute("PRAGMA journal_mode=WAL")
-        if args.stream_seconds:
-            stream_events(config, secrets, db, args.send, args.stream_seconds)
-            return
-        while True:
-            delay = interval
-            try:
-                run_cycle(config, secrets, db, args.send)
-            except SourceRateLimited as exc:
-                delay = max(interval, min(exc.retry_after, 300))
-                print(f"Цикл приостановлен: {exc}", file=sys.stderr, flush=True)
-            except RuntimeError as exc:
-                print(f"Цикл пропущен: {exc}", file=sys.stderr, flush=True)
-            if args.once:
+    with sqlite3.connect(ROOT / "settings.sqlite3", timeout=5) as settings_db:
+        settings_db.execute("PRAGMA busy_timeout=5000")
+        settings_db.execute("PRAGMA journal_mode=WAL")
+        activate_settings(settings_db)
+        with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
+            db.execute("PRAGMA busy_timeout=30000")
+            db.execute("PRAGMA journal_mode=WAL")
+            if args.stream_seconds:
+                stream_events(config, secrets, db, args.send, args.stream_seconds)
                 return
-            time.sleep(delay)
+            while True:
+                delay = interval
+                try:
+                    run_cycle(config, secrets, db, args.send)
+                except SourceRateLimited as exc:
+                    delay = max(interval, min(exc.retry_after, 300))
+                    print(f"Цикл приостановлен: {exc}", file=sys.stderr, flush=True)
+                except RuntimeError as exc:
+                    print(f"Цикл пропущен: {exc}", file=sys.stderr, flush=True)
+                if args.once:
+                    return
+                time.sleep(delay)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 secrets.json
 state.sqlite3*
+settings.sqlite3*
 mrkt_state.sqlite3*
 __pycache__/
 .venv/

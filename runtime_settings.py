@@ -8,6 +8,21 @@ SETTING_LABELS = {
     "min_floor_rub": "минимальный floor",
 }
 
+_ACTIVE_SETTINGS_DB = None
+
+
+def activate_settings(db):
+    """Set the dedicated settings connection for this monitor process."""
+    global _ACTIVE_SETTINGS_DB
+    _ACTIVE_SETTINGS_DB = db
+
+
+def active_config(config):
+    """Apply live settings when a production settings connection is active."""
+    if _ACTIVE_SETTINGS_DB is None:
+        return dict(config)
+    return effective_config(config, _ACTIVE_SETTINGS_DB)
+
 
 def ensure_settings_table(db):
     db.execute(

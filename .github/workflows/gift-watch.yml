@@ -36,6 +36,7 @@ jobs:
         with:
           path: |
             state.sqlite3
+            settings.sqlite3
           key: gift-watch-state-${{ github.run_id }}
           restore-keys: gift-watch-state-
 
@@ -105,6 +106,7 @@ jobs:
         with:
           path: |
             state.sqlite3
+            settings.sqlite3
           key: gift-watch-state-${{ github.run_id }}
 
       - name: Remove older state caches

@@ -16,6 +16,7 @@ def ensure_table(db):
         "checked REAL NOT NULL DEFAULT 0, sold_at REAL, "
         "PRIMARY KEY (market, gift_id))"
     )
+    db.commit()
 
 
 def remember_alert(db, market, item, result, message_id):
