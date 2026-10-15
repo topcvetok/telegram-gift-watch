@@ -22,7 +22,7 @@ from market_data import (
     complete_market_floors,
     record_market_activity,
 )
-from runtime_settings import activate_settings, active_config
+from runtime_settings import activate_settings, active_config, threshold_ton
 from tonnel_watch import (
     SourceRateLimited,
     allowed_backdrop,
@@ -542,7 +542,7 @@ def send_if_new_price(item, result, config, secrets, db, send=True):
 
 def process_listing(item, config, secrets, db, session, token, send=True):
     rate = load_rate(db)
-    if item["price"] * rate > decimal(config["max_lot_rub"], "лимит на лот"):
+    if item["price"] > threshold_ton(config, "max_lot", rate):
         return False
     collection_book = cached_book(
         db, session, token, collection=item["name"],

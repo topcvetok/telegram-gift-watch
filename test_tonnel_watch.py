@@ -220,6 +220,14 @@ class TonnelScoringTests(unittest.TestCase):
     def test_budget_is_enforced(self):
         self.assertIsNone(watch.score(gift(1, 20.0), self.floor, Decimal("124.42"), self.config))
 
+    def test_ton_budget_is_compared_without_rate_conversion(self):
+        config = dict(
+            self.config, max_lot_ton=Decimal("8"), min_scenario_profit_rub=0
+        )
+        floor = [gift(i, price) for i, price in enumerate([10, 10.1, 10.2, 10.3, 10.4], 2)]
+        self.assertIsNotNone(watch.score(gift(1, 7.0), floor, Decimal("1"), config))
+        self.assertIsNone(watch.score(gift(1, 9.0), floor, Decimal("1000"), config))
+
     def test_slug(self):
         self.assertEqual(watch.slug(gift(123, 2.0)), "chillflame-123")
 

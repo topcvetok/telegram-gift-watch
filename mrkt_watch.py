@@ -17,7 +17,7 @@ from bot import ROOT, telegram
 from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
-from runtime_settings import activate_settings, active_config
+from runtime_settings import activate_settings, active_config, threshold_ton
 from tonnel_watch import apply_sales_evidence, best_score, decimal, load_rate, slug
 
 API_URL = "https://api.tgmrkt.io/api/v1"
@@ -347,7 +347,7 @@ def process_event(event, config, secrets, db, session, token, send=True):
         item = mrkt_item(event.get("gift"), event)
         if item is not None:
             rate = load_rate(db)
-            if item["price"] * rate <= decimal(config["max_lot_rub"]):
+            if item["price"] <= threshold_ton(config, "max_lot", rate):
                 collection = item.get("name")
                 collection_book = cached_book(
                     db, session, token, collection=collection, config=config

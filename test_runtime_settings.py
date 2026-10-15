@@ -1,13 +1,13 @@
 import sqlite3
 import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
 
 from runtime_settings import (
     activate_settings,
     active_config,
     effective_config,
-    max_purchase_limit,
     set_setting,
 )
 
@@ -27,24 +27,28 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.db.close()
 
     def test_overrides_are_persistent_and_leave_source_config_unchanged(self):
-        set_setting(self.db, "max_lot_rub", 3000, maximum=4000)
+        set_setting(self.db, "max_lot_rub", 3000)
         set_setting(self.db, "min_floor_rub", 1500)
         current = effective_config(self.config, self.db)
         self.assertEqual(current["max_lot_rub"], 3000)
         self.assertEqual(current["min_floor_rub"], 1500)
         self.assertEqual(self.config["max_lot_rub"], 2000)
 
-    def test_maximum_purchase_respects_budget_reserve(self):
-        self.assertEqual(max_purchase_limit(self.config), 4000)
-        with self.assertRaisesRegex(ValueError, "4000"):
-            set_setting(self.db, "max_lot_rub", 4001, maximum=4000)
+    def test_maximum_purchase_has_no_budget_cap(self):
+        set_setting(self.db, "max_lot_rub", 25000)
+        self.assertEqual(effective_config(self.config, self.db)["max_lot_rub"], 25000)
+
+    def test_ton_threshold_is_stored_without_conversion(self):
+        set_setting(self.db, "max_lot_rub", "20.5", currency="ton")
+        current = effective_config(self.config, self.db)
+        self.assertEqual(current["max_lot_ton"], Decimal("20.5"))
 
     def test_floor_can_be_disabled_with_zero(self):
         set_setting(self.db, "min_floor_rub", 0)
         self.assertEqual(effective_config(self.config, self.db)["min_floor_rub"], 0)
 
     def test_active_config_reads_dedicated_settings_connection(self):
-        set_setting(self.db, "max_lot_rub", 2750, maximum=4000)
+        set_setting(self.db, "max_lot_rub", 2750)
         activate_settings(self.db)
         self.assertEqual(active_config(self.config)["max_lot_rub"], 2750)
 

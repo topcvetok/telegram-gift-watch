@@ -8,6 +8,8 @@ SETTING_LABELS = {
     "min_floor_rub": "минимальный floor",
 }
 
+CURRENCIES = {"rub", "ton"}
+
 _ACTIVE_SETTINGS_DB = None
 
 
@@ -50,34 +52,65 @@ def effective_config(config, db):
     """Return a config copy with current Telegram-controlled thresholds."""
     ensure_settings_table(db)
     result = dict(config)
+    keys = tuple(SETTING_LABELS) + tuple(f"{key}:currency" for key in SETTING_LABELS)
     rows = db.execute(
-        "SELECT key, value FROM runtime_settings WHERE key IN (?, ?)",
-        tuple(SETTING_LABELS),
+        f"SELECT key, value FROM runtime_settings WHERE key IN ({','.join('?' * len(keys))})",
+        keys,
     ).fetchall()
-    for key, value in rows:
-        result[key] = _rubles(value, SETTING_LABELS[key])
+    stored = dict(rows)
+    for key, label in SETTING_LABELS.items():
+        if key not in stored:
+            continue
+        currency = stored.get(f"{key}:currency", "rub")
+        ton_key = key.removesuffix("_rub") + "_ton"
+        if currency == "ton":
+            result[ton_key] = _tons(stored[key], label)
+        else:
+            result[key] = _rubles(stored[key], label)
+            result.pop(ton_key, None)
     return result
 
 
-def set_setting(db, key, value, *, maximum=None):
+def _tons(value, label):
+    try:
+        amount = Decimal(str(value))
+    except InvalidOperation:
+        raise ValueError(f"{label}: укажи число в TON") from None
+    if not amount.is_finite() or amount < 0:
+        raise ValueError(f"{label}: значение в TON не может быть отрицательным")
+    return amount
+
+
+def set_setting(db, key, value, *, currency="rub"):
     if key not in SETTING_LABELS:
         raise ValueError("Неизвестная настройка")
-    amount = _rubles(value, SETTING_LABELS[key])
-    if key == "max_lot_rub" and amount < 1:
-        raise ValueError("Максимальная стоимость должна быть не меньше 1 ₽")
-    if maximum is not None and amount > maximum:
-        raise ValueError(f"Максимальная стоимость не может превышать {maximum} ₽")
+    if currency not in CURRENCIES:
+        raise ValueError("Неизвестная валюта")
+    amount = (
+        _tons(value, SETTING_LABELS[key])
+        if currency == "ton"
+        else _rubles(value, SETTING_LABELS[key])
+    )
+    if key == "max_lot_rub" and amount <= 0:
+        raise ValueError("Максимальная стоимость должна быть больше нуля")
     ensure_settings_table(db)
     db.execute(
         "INSERT OR REPLACE INTO runtime_settings (key, value, updated) "
         "VALUES (?, ?, unixepoch())",
         (key, str(amount)),
     )
+    db.execute(
+        "INSERT OR REPLACE INTO runtime_settings (key, value, updated) "
+        "VALUES (?, ?, unixepoch())",
+        (f"{key}:currency", currency),
+    )
     db.commit()
     return amount
 
 
-def max_purchase_limit(config):
-    budget = _rubles(config.get("budget_rub", 0), "бюджет")
-    reserve = _rubles(config.get("reserve_rub", 0), "резерв")
-    return max(1, budget - reserve) if budget else None
+def threshold_ton(config, name, rate):
+    """Return a RUB- or TON-configured threshold in marketplace TON units."""
+    ton_key = f"{name}_ton"
+    if ton_key in config:
+        return _tons(config[ton_key], name)
+    return Decimal(str(config.get(f"{name}_rub", 0))) / Decimal(str(rate))

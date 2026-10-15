@@ -19,7 +19,7 @@ from bot import ROOT, telegram
 from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
-from runtime_settings import activate_settings, active_config
+from runtime_settings import activate_settings, active_config, threshold_ton
 
 TONNEL_URL = "https://gifts2.tonnel.network/api/pageGifts"
 EVENTS_URL = "https://gifts.coffin.meme/api/marketplace/events"
@@ -124,7 +124,7 @@ def load_variant_books(db, collection, items, rate, config, query_budget):
         "PRIMARY KEY (scope, collection, trait))"
     )
     db.commit()
-    budget = decimal(config["max_lot_rub"], "лимит на лот") / rate
+    budget = threshold_ton(config, "max_lot", rate)
     keys = []
     seen = set()
     for item in items:
@@ -242,7 +242,7 @@ def score(item, floor_book, rate, config):
     if not eligible(item):
         return None
     price = decimal(item["price"], "цена покупки")
-    max_lot_ton = decimal(config["max_lot_rub"], "лимит на лот") / rate
+    max_lot_ton = threshold_ton(config, "max_lot", rate)
     if price > max_lot_ton:
         return None
     others = []
@@ -261,8 +261,8 @@ def score(item, floor_book, rate, config):
     max_spread = decimal(config["floor_cluster_max_spread_fraction"], "разброс floor")
     if cluster[-1] > next_floor * (1 + max_spread):
         return None
-    min_floor_rub = decimal(config.get("min_floor_rub", 0), "минимальный floor")
-    if next_floor * rate < min_floor_rub:
+    min_floor_ton = threshold_ton(config, "min_floor", rate)
+    if next_floor < min_floor_ton:
         return None
     discount = (next_floor - price) / next_floor
     if discount < decimal(config["min_discount_fraction"], "минимальная скидка"):
@@ -628,8 +628,8 @@ def process_event(event, config, secrets, db, send=True):
     item = event_item(event)
     if item is not None and collection_enabled(item.get("name"), config):
         rate = load_rate(db)
-        if decimal(item.get("price"), "цена") * rate <= decimal(
-            config["max_lot_rub"], "лимит на лот"
+        if decimal(item.get("price"), "цена") <= threshold_ton(
+            config, "max_lot", rate
         ):
             floor_book = load_collection_book(db, item["name"], config)
             variant_books = load_variant_books(

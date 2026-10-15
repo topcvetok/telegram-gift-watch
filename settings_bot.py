@@ -2,12 +2,14 @@
 
 import argparse
 import json
+import re
 import sqlite3
 import sys
 import time
+from decimal import Decimal
 
 from bot import ROOT, request_json
-from runtime_settings import SETTING_LABELS, effective_config, max_purchase_limit, set_setting
+from runtime_settings import SETTING_LABELS, effective_config, set_setting
 
 
 def api(secrets, method, payload=None):
@@ -24,15 +26,25 @@ def settings_text(config, db):
     current = effective_config(config, db)
     return (
         "<b>Настройки Gift Watch</b>\n\n"
-        f"💰 Максимальная стоимость: <b>{format_rubles(current['max_lot_rub'])} ₽</b>\n"
-        f"📊 Минимальный floor: <b>{format_rubles(current['min_floor_rub'])} ₽</b>\n\n"
-        "Нажми кнопку и отправь свою цену обычным сообщением. "
+        f"💰 Максимальная стоимость: <b>{format_threshold(current, 'max_lot')}</b>\n"
+        f"📊 Минимальный floor: <b>{format_threshold(current, 'min_floor')}</b>\n\n"
+        "Нажми кнопку и отправь цену в рублях или TON. "
         "Новое значение сразу применится ко всем площадкам."
     )
 
 
 def format_rubles(value):
     return f"{int(value):,}".replace(",", " ")
+
+
+def format_threshold(config, name):
+    ton_key = f"{name}_ton"
+    if ton_key in config:
+        value = format(Decimal(str(config[ton_key])), "f")
+        if "." in value:
+            value = value.rstrip("0").rstrip(".")
+        return f"{value or '0'} TON"
+    return f"{format_rubles(config[f'{name}_rub'])} ₽"
 
 
 def settings_keyboard(config, db):
@@ -76,11 +88,12 @@ def send_text(secrets, text):
 
 def send_input_prompt(secrets, key, config):
     if key == "max_lot_rub":
-        limit = max_purchase_limit(config)
-        limit_text = f" от 1 до {format_rubles(limit)} ₽" if limit is not None else ""
-        text = f"Введи максимальную стоимость подарка{limit_text}. Например: <b>2500</b>"
+        text = (
+            "Введи максимальную стоимость подарка от 1 ₽. "
+            "Например: <b>5000 ₽</b> или <b>25 TON</b>"
+        )
     else:
-        text = "Введи минимальный floor в рублях. Например: <b>1200</b>"
+        text = "Введи минимальный floor. Например: <b>1200 ₽</b> или <b>6 TON</b>"
     return api(secrets, "sendMessage", {
         "chat_id": secrets["chat_id"],
         "text": text,
@@ -126,11 +139,20 @@ def clear_input(db, chat_id):
     db.commit()
 
 
-def normalize_price_text(text):
-    value = str(text or "").strip().replace(" ", "").replace("₽", "")
-    if not value or not value.isdecimal():
-        raise ValueError("Введи цену целым числом в рублях, например: 2500")
-    return value
+def normalize_price_text(text, db=None):
+    value = str(text or "").strip().casefold().replace(" ", "")
+    match = re.fullmatch(
+        r"(\d+(?:[.,]\d+)?)(ton|тон|₽|rub|руб|рублей|р)?", value
+    )
+    if not match:
+        raise ValueError("Введи цену, например: 2500 ₽ или 12.5 TON")
+    number, currency = match.groups()
+    if currency in ("ton", "тон"):
+        amount = Decimal(number.replace(",", "."))
+        return format(amount, "f"), "ton"
+    if not number.isdecimal():
+        raise ValueError("Сумму в рублях укажи целым числом")
+    return number, "rub"
 
 
 def parse_command(text):
@@ -151,11 +173,11 @@ def apply_command(text, config, db):
     key = mapping.get(command)
     if key is None:
         return None
-    if len(args) != 1:
+    if not args:
         example = "/maxprice 2500" if key == "max_lot_rub" else "/minfloor 1200"
         raise ValueError(f"Формат команды: {example}")
-    maximum = max_purchase_limit(config) if key == "max_lot_rub" else None
-    set_setting(db, key, args[0], maximum=maximum)
+    value, currency = normalize_price_text(" ".join(args))
+    set_setting(db, key, value, currency=currency)
     return "settings"
 
 
@@ -183,9 +205,8 @@ def handle_update(update, secrets, config, db):
             command, _ = parse_command(text)
             key = pending_input(db, expected_chat)
             if key is not None and not command.startswith("/"):
-                value = normalize_price_text(text)
-                maximum = max_purchase_limit(config) if key == "max_lot_rub" else None
-                set_setting(db, key, value, maximum=maximum)
+                value, currency = normalize_price_text(text)
+                set_setting(db, key, value, currency=currency)
                 clear_input(db, expected_chat)
                 show_settings(secrets, config, db)
                 return

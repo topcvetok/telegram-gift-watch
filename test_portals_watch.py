@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import Mock, patch
 
@@ -15,7 +16,7 @@ def raw_gift(gift_id="p1", price="8", **changes):
         "name": "Evil Eye",
         "price": price,
         "status": "listed",
-        "listed_at": "2026-10-13T09:16:27Z",
+        "listed_at": datetime.now(timezone.utc).isoformat(),
         "unlocks_at": "2025-01-01T00:00:00Z",
         "attributes": [
             {"type": "model", "value": "Watcher"},
