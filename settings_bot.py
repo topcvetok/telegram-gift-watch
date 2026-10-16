@@ -9,7 +9,14 @@ import time
 from decimal import Decimal
 
 from bot import ROOT, request_json
-from runtime_settings import SETTING_LABELS, effective_config, set_setting
+from runtime_settings import (
+    SETTING_LABELS,
+    SOURCE_LABELS,
+    effective_config,
+    set_setting,
+    set_source_enabled,
+    source_enabled,
+)
 
 
 def api(secrets, method, payload=None):
@@ -24,12 +31,17 @@ def api(secrets, method, payload=None):
 
 def settings_text(config, db):
     current = effective_config(config, db)
+    sources = "\n".join(
+        f"{'✅' if source_enabled(current, source) else '❌'} {label}"
+        for source, label in SOURCE_LABELS.items()
+    )
     return (
         "<b>Настройки Gift Watch</b>\n\n"
         f"💰 Максимальная стоимость: <b>{format_threshold(current, 'max_lot')}</b>\n"
         f"📊 Минимальный floor: <b>{format_threshold(current, 'min_floor')}</b>\n\n"
+        f"<b>Площадки:</b>\n{sources}\n\n"
         "Нажми кнопку и отправь цену в рублях или TON. "
-        "Новое значение сразу применится ко всем площадкам."
+        "Цены и переключатели применяются сразу."
     )
 
 
@@ -48,7 +60,11 @@ def format_threshold(config, name):
 
 
 def settings_keyboard(config, db):
-    effective_config(config, db)
+    current = effective_config(config, db)
+    source_rows = [[{
+        "text": f"{'✅' if source_enabled(current, source) else '❌'} {label}",
+        "callback_data": f"settings:toggle:{source}",
+    }] for source, label in SOURCE_LABELS.items()]
     return {"inline_keyboard": [
         [{
             "text": "💰 Ввести максимальную стоимость",
@@ -58,6 +74,7 @@ def settings_keyboard(config, db):
             "text": "📊 Ввести минимальный floor",
             "callback_data": "settings:input:min_floor_rub",
         }],
+        *source_rows,
         [{"text": "🔄 Обновить настройки", "callback_data": "settings:refresh"}],
     ]}
 
@@ -100,7 +117,7 @@ def send_input_prompt(secrets, key, config):
         "parse_mode": "HTML",
         "reply_markup": {
             "force_reply": True,
-            "input_field_placeholder": "Введи сумму в рублях",
+            "input_field_placeholder": "Например: 20 TON",
         },
         "link_preview_options": {"is_disabled": True},
     })
@@ -185,6 +202,11 @@ def apply_callback(data, config, db):
     if data == "settings:refresh":
         return "refresh", None
     parts = str(data or "").split(":")
+    if len(parts) == 3 and parts[:2] == ["settings", "toggle"]:
+        source = parts[2]
+        current = effective_config(config, db)
+        enabled = set_source_enabled(db, source, not source_enabled(current, source))
+        return ("enabled" if enabled else "disabled"), source
     if len(parts) != 3 or parts[:2] != ["settings", "input"]:
         raise ValueError("Неизвестная кнопка")
     key = parts[2]
@@ -232,9 +254,15 @@ def handle_update(update, secrets, config, db):
     try:
         action, key = apply_callback(callback.get("data"), config, db)
         if callback_id:
+            if action == "input":
+                answer = "Теперь введи цену"
+            elif action in ("enabled", "disabled"):
+                answer = f"{SOURCE_LABELS[key]} {'включён' if action == 'enabled' else 'отключён'}"
+            else:
+                answer = "Настройки обновлены"
             api(secrets, "answerCallbackQuery", {
                 "callback_query_id": callback_id,
-                "text": "Теперь введи цену" if action == "input" else "Настройки обновлены",
+                "text": answer,
             })
         if action == "input":
             begin_input(db, expected_chat, key)

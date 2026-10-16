@@ -19,7 +19,7 @@ from bot import ROOT, telegram
 from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
-from runtime_settings import activate_settings, active_config, threshold_ton
+from runtime_settings import activate_settings, active_config, source_enabled, threshold_ton
 
 TONNEL_URL = "https://gifts2.tonnel.network/api/pageGifts"
 EVENTS_URL = "https://gifts.coffin.meme/api/marketplace/events"
@@ -598,6 +598,8 @@ def collection_enabled(name, config):
 
 def process_event(event, config, secrets, db, send=True):
     config = active_config(config)
+    if not source_enabled(config, "tonnel"):
+        return False
     event_id = event.get("eventId") if isinstance(event, dict) else None
     if not isinstance(event_id, str) or not event_id:
         return False
@@ -695,6 +697,9 @@ def stream_events(config, secrets, db, send=True, duration=14340):
     deadline = time.monotonic() + max(60, int(duration))
     delivered = 0
     while time.monotonic() < deadline:
+        if not source_enabled(active_config(config), "tonnel"):
+            time.sleep(min(3, max(0, deadline - time.monotonic())))
+            continue
         try:
             with requests.Session(impersonate="chrome") as session:
                 socket = session.ws_connect(EVENTS_WS_URL, timeout=20)
@@ -740,6 +745,8 @@ def load_rate(db, max_age=3600):
 
 def run_cycle(config, secrets, db, send=False):
     config = active_config(config)
+    if not source_enabled(config, "tonnel"):
+        return 0
     rate = load_rate(db)
     db.execute("CREATE TABLE IF NOT EXISTS tonnel_alerts (id TEXT PRIMARY KEY, price TEXT, sent REAL)")
     total = candidates = delivered = 0

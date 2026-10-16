@@ -50,6 +50,13 @@ class MrktTests(unittest.TestCase):
             "liquidity_high_sales_24h": 8,
         }
 
+    def test_disabled_mrkt_skips_feed(self):
+        db = sqlite3.connect(":memory:")
+        config = dict(self.config, mrkt_enabled=False)
+        with patch.object(watch, "fetch_feed") as fetch:
+            self.assertEqual(watch.run_cycle(config, {}, db, Mock(), "token", send=False), 0)
+        fetch.assert_not_called()
+
     def test_current_api_contract(self):
         query = watch.listing_query(collection="Evil Eye", model="Watcher")
         self.assertEqual(query["collectionNames"], ["Evil Eye"])

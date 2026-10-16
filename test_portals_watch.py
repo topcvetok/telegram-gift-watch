@@ -252,6 +252,13 @@ class PortalsTests(unittest.TestCase):
         self.assertEqual(rows, [("listing", 1), ("price", 1)])
         self.assertEqual(process.call_count, 1)
 
+    def test_disabled_portals_skips_feed(self):
+        db = sqlite3.connect(":memory:")
+        config = dict(self.config, portals_enabled=False)
+        with patch.object(watch, "fetch_listings") as fetch:
+            self.assertEqual(watch.run_cycle(config, {}, db, Mock(), send=False), 0)
+        fetch.assert_not_called()
+
     def test_sold_listing_edits_its_alert(self):
         db = sqlite3.connect(":memory:")
         with patch.object(watch, "pending_offer_ids", return_value=["p1"]), \

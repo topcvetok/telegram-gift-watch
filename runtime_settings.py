@@ -9,6 +9,11 @@ SETTING_LABELS = {
 }
 
 CURRENCIES = {"rub", "ton"}
+SOURCE_LABELS = {
+    "tonnel": "Tonnel",
+    "portals": "Portals",
+    "mrkt": "MRKT",
+}
 
 _ACTIVE_SETTINGS_DB = None
 
@@ -52,7 +57,11 @@ def effective_config(config, db):
     """Return a config copy with current Telegram-controlled thresholds."""
     ensure_settings_table(db)
     result = dict(config)
-    keys = tuple(SETTING_LABELS) + tuple(f"{key}:currency" for key in SETTING_LABELS)
+    keys = (
+        tuple(SETTING_LABELS)
+        + tuple(f"{key}:currency" for key in SETTING_LABELS)
+        + tuple(f"{source}_enabled" for source in SOURCE_LABELS)
+    )
     rows = db.execute(
         f"SELECT key, value FROM runtime_settings WHERE key IN ({','.join('?' * len(keys))})",
         keys,
@@ -68,6 +77,11 @@ def effective_config(config, db):
         else:
             result[key] = _rubles(stored[key], label)
             result.pop(ton_key, None)
+    for source in SOURCE_LABELS:
+        key = f"{source}_enabled"
+        result[key] = stored.get(key, str(config.get(key, True))).casefold() not in {
+            "0", "false", "off", "no"
+        }
     return result
 
 
@@ -106,6 +120,25 @@ def set_setting(db, key, value, *, currency="rub"):
     )
     db.commit()
     return amount
+
+
+def set_source_enabled(db, source, enabled):
+    if source not in SOURCE_LABELS:
+        raise ValueError("Неизвестная площадка")
+    ensure_settings_table(db)
+    db.execute(
+        "INSERT OR REPLACE INTO runtime_settings (key, value, updated) "
+        "VALUES (?, ?, unixepoch())",
+        (f"{source}_enabled", "1" if enabled else "0"),
+    )
+    db.commit()
+    return bool(enabled)
+
+
+def source_enabled(config, source):
+    if source not in SOURCE_LABELS:
+        raise ValueError("Неизвестная площадка")
+    return bool(config.get(f"{source}_enabled", True))
 
 
 def threshold_ton(config, name, rate):

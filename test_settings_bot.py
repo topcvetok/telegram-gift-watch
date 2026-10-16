@@ -51,13 +51,31 @@ class SettingsBotTests(unittest.TestCase):
         self.assertIn("2 000 ₽", text)
         self.assertIn("1 800 ₽", text)
 
-    def test_keyboard_has_two_free_input_buttons(self):
+    def test_keyboard_has_price_and_market_buttons(self):
         rows = settings_bot.settings_keyboard(self.config, self.db)["inline_keyboard"]
         self.assertTrue(all(len(row) == 1 for row in rows))
         labels = [row[0]["text"] for row in rows]
         self.assertIn("💰 Ввести максимальную стоимость", labels)
         self.assertIn("📊 Ввести минимальный floor", labels)
+        self.assertIn("✅ Tonnel", labels)
+        self.assertIn("✅ Portals", labels)
+        self.assertIn("✅ MRKT", labels)
         self.assertNotIn("2 000 ₽", " ".join(labels))
+
+    def test_market_button_toggles_source(self):
+        self.assertEqual(
+            settings_bot.apply_callback("settings:toggle:portals", self.config, self.db),
+            ("disabled", "portals"),
+        )
+        labels = [
+            row[0]["text"]
+            for row in settings_bot.settings_keyboard(self.config, self.db)["inline_keyboard"]
+        ]
+        self.assertIn("❌ Portals", labels)
+        self.assertEqual(
+            settings_bot.apply_callback("settings:toggle:portals", self.config, self.db),
+            ("enabled", "portals"),
+        )
 
     def test_price_text_accepts_spaces_and_ruble_sign(self):
         self.assertEqual(settings_bot.normalize_price_text("2 750 ₽"), ("2750", "rub"))

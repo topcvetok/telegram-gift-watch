@@ -22,7 +22,7 @@ from market_data import (
     complete_market_floors,
     record_market_activity,
 )
-from runtime_settings import activate_settings, active_config, threshold_ton
+from runtime_settings import activate_settings, active_config, source_enabled, threshold_ton
 from tonnel_watch import (
     SourceRateLimited,
     allowed_backdrop,
@@ -575,6 +575,8 @@ def process_listing(item, config, secrets, db, session, token, send=True):
 
 def run_cycle(config, secrets, db, session, token="", send=True):
     config = active_config(config)
+    if not source_enabled(config, "portals"):
+        return 0
     latest = fetch_listings(
         session, token, sort="listed_at desc", limit=int(config.get("portals_feed_limit", 20))
     )

@@ -220,6 +220,12 @@ class TonnelScoringTests(unittest.TestCase):
     def test_budget_is_enforced(self):
         self.assertIsNone(watch.score(gift(1, 20.0), self.floor, Decimal("124.42"), self.config))
 
+    def test_disabled_tonnel_skips_polling(self):
+        config = dict(self.config, tonnel_enabled=False)
+        with patch.object(watch, "load_rate") as load_rate:
+            self.assertEqual(watch.run_cycle(config, {}, sqlite3.connect(":memory:")), 0)
+        load_rate.assert_not_called()
+
     def test_ton_budget_is_compared_without_rate_conversion(self):
         config = dict(
             self.config, max_lot_ton=Decimal("8"), min_scenario_profit_rub=0

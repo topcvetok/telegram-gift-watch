@@ -9,6 +9,8 @@ from runtime_settings import (
     active_config,
     effective_config,
     set_setting,
+    set_source_enabled,
+    source_enabled,
 )
 
 
@@ -46,6 +48,12 @@ class RuntimeSettingsTests(unittest.TestCase):
     def test_floor_can_be_disabled_with_zero(self):
         set_setting(self.db, "min_floor_rub", 0)
         self.assertEqual(effective_config(self.config, self.db)["min_floor_rub"], 0)
+
+    def test_market_switches_are_persistent_and_default_on(self):
+        current = effective_config(self.config, self.db)
+        self.assertTrue(all(source_enabled(current, source) for source in ("tonnel", "portals", "mrkt")))
+        set_source_enabled(self.db, "portals", False)
+        self.assertFalse(source_enabled(effective_config(self.config, self.db), "portals"))
 
     def test_active_config_reads_dedicated_settings_connection(self):
         set_setting(self.db, "max_lot_rub", 2750)
