@@ -20,6 +20,7 @@ from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
 from runtime_settings import activate_settings, active_config, source_enabled, threshold_ton
+from special_traits import apply_special_bases
 
 TONNEL_URL = "https://gifts2.tonnel.network/api/pageGifts"
 EVENTS_URL = "https://gifts.coffin.meme/api/marketplace/events"
@@ -639,6 +640,7 @@ def process_event(event, config, secrets, db, send=True):
                 [int(config.get("variant_query_budget_per_event", 1))],
             )
             result = best_score(item, floor_book, variant_books, rate, config)
+            result = apply_special_bases(item, result, config, db)
             result = apply_sales_evidence(item, result, db, config)
             result = attach_cross_market_floors(item, result, config, secrets, db)
             if result is not None:
@@ -767,6 +769,7 @@ def run_cycle(config, secrets, db, send=False):
             for item in newest:
                 try:
                     result = best_score(item, floor_book, variant_books, rate, config)
+                    result = apply_special_bases(item, result, config, db)
                     result = apply_sales_evidence(item, result, db, config)
                     result = attach_cross_market_floors(item, result, config, secrets, db)
                 except (ValueError, KeyError, TypeError):

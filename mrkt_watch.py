@@ -18,6 +18,7 @@ from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
 from runtime_settings import activate_settings, active_config, source_enabled, threshold_ton
+from special_traits import apply_special_bases
 from tonnel_watch import apply_sales_evidence, best_score, decimal, load_rate, slug
 
 API_URL = "https://api.tgmrkt.io/api/v1"
@@ -365,6 +366,7 @@ def process_event(event, config, secrets, db, session, token, send=True):
                     )
                 score_config = mrkt_scoring_config(config)
                 result = best_score(item, collection_book, variant_books, rate, score_config)
+                result = apply_special_bases(item, result, score_config, db)
                 result = apply_sales_evidence(item, result, db, score_config)
                 result = attach_cross_market_floors(
                     item, result, config, secrets, db, session=session, token=token

@@ -60,6 +60,10 @@ class SettingsBotTests(unittest.TestCase):
         self.assertIn("✅ Tonnel", labels)
         self.assertIn("✅ Portals", labels)
         self.assertIn("✅ MRKT", labels)
+        self.assertIn("✅ Красивый номер", labels)
+        self.assertIn("🔢 Разных цифр: 3", labels)
+        self.assertIn("✅ Монохром", labels)
+        self.assertIn("🎨 Совпадение: от 80%", labels)
         self.assertNotIn("2 000 ₽", " ".join(labels))
 
     def test_market_button_toggles_source(self):
@@ -76,6 +80,28 @@ class SettingsBotTests(unittest.TestCase):
             settings_bot.apply_callback("settings:toggle:portals", self.config, self.db),
             ("enabled", "portals"),
         )
+
+    def test_special_basis_buttons_toggle_and_accept_free_values(self):
+        self.assertEqual(
+            settings_bot.apply_callback(
+                "settings:feature:monochrome", self.config, self.db
+            ),
+            ("feature_disabled", "monochrome"),
+        )
+        self.assertEqual(
+            settings_bot.apply_callback(
+                "settings:number:monochrome_min_score", self.config, self.db
+            ),
+            ("input", "monochrome_min_score"),
+        )
+        settings_bot.begin_input(self.db, "42", "monochrome_min_score")
+        update = {"message": {"chat": {"id": 42}, "text": "85%"}}
+        with patch.object(settings_bot, "show_settings") as show:
+            settings_bot.handle_update(
+                update, {"chat_id": 42, "bot_token": "token"}, self.config, self.db
+            )
+        self.assertEqual(effective_config(self.config, self.db)["monochrome_min_score"], 85)
+        show.assert_called_once()
 
     def test_price_text_accepts_spaces_and_ruble_sign(self):
         self.assertEqual(settings_bot.normalize_price_text("2 750 ₽"), ("2750", "rub"))

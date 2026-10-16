@@ -23,6 +23,7 @@ from market_data import (
     record_market_activity,
 )
 from runtime_settings import activate_settings, active_config, source_enabled, threshold_ton
+from special_traits import apply_special_bases
 from tonnel_watch import (
     SourceRateLimited,
     allowed_backdrop,
@@ -563,6 +564,7 @@ def process_listing(item, config, secrets, db, session, token, send=True):
         )
     score_config = portals_scoring_config(config)
     result = best_score(item, collection_book, variant_books, rate, score_config)
+    result = apply_special_bases(item, result, score_config, db)
     result = apply_sales_evidence(item, result, db, score_config)
     if result is None:
         return False

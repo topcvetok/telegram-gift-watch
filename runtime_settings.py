@@ -14,6 +14,18 @@ SOURCE_LABELS = {
     "portals": "Portals",
     "mrkt": "MRKT",
 }
+FEATURE_LABELS = {
+    "beautiful_number": "Красивый номер",
+    "monochrome": "Монохром",
+}
+NUMBER_SETTING_LABELS = {
+    "beautiful_number_max_distinct_digits": "максимум разных цифр в номере",
+    "monochrome_min_score": "минимальное совпадение монохрома",
+}
+NUMBER_SETTING_RANGES = {
+    "beautiful_number_max_distinct_digits": (1, 10),
+    "monochrome_min_score": (0, 100),
+}
 
 _ACTIVE_SETTINGS_DB = None
 
@@ -61,6 +73,8 @@ def effective_config(config, db):
         tuple(SETTING_LABELS)
         + tuple(f"{key}:currency" for key in SETTING_LABELS)
         + tuple(f"{source}_enabled" for source in SOURCE_LABELS)
+        + tuple(f"{feature}_enabled" for feature in FEATURE_LABELS)
+        + tuple(NUMBER_SETTING_LABELS)
     )
     rows = db.execute(
         f"SELECT key, value FROM runtime_settings WHERE key IN ({','.join('?' * len(keys))})",
@@ -82,7 +96,26 @@ def effective_config(config, db):
         result[key] = stored.get(key, str(config.get(key, True))).casefold() not in {
             "0", "false", "off", "no"
         }
+    for feature in FEATURE_LABELS:
+        key = f"{feature}_enabled"
+        result[key] = stored.get(key, str(config.get(key, True))).casefold() not in {
+            "0", "false", "off", "no"
+        }
+    for key, label in NUMBER_SETTING_LABELS.items():
+        if key in stored:
+            result[key] = _integer_setting(key, stored[key], label)
     return result
+
+
+def _integer_setting(key, value, label):
+    try:
+        amount = int(str(value).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"{label}: нужно указать целое число") from None
+    low, high = NUMBER_SETTING_RANGES[key]
+    if not low <= amount <= high:
+        raise ValueError(f"{label}: допустимо от {low} до {high}")
+    return amount
 
 
 def _tons(value, label):
@@ -135,10 +168,43 @@ def set_source_enabled(db, source, enabled):
     return bool(enabled)
 
 
+def set_feature_enabled(db, feature, enabled):
+    if feature not in FEATURE_LABELS:
+        raise ValueError("Неизвестное основание")
+    ensure_settings_table(db)
+    db.execute(
+        "INSERT OR REPLACE INTO runtime_settings (key, value, updated) "
+        "VALUES (?, ?, unixepoch())",
+        (f"{feature}_enabled", "1" if enabled else "0"),
+    )
+    db.commit()
+    return bool(enabled)
+
+
+def set_number_setting(db, key, value):
+    if key not in NUMBER_SETTING_LABELS:
+        raise ValueError("Неизвестная настройка")
+    amount = _integer_setting(key, value, NUMBER_SETTING_LABELS[key])
+    ensure_settings_table(db)
+    db.execute(
+        "INSERT OR REPLACE INTO runtime_settings (key, value, updated) "
+        "VALUES (?, ?, unixepoch())",
+        (key, str(amount)),
+    )
+    db.commit()
+    return amount
+
+
 def source_enabled(config, source):
     if source not in SOURCE_LABELS:
         raise ValueError("Неизвестная площадка")
     return bool(config.get(f"{source}_enabled", True))
+
+
+def feature_enabled(config, feature):
+    if feature not in FEATURE_LABELS:
+        raise ValueError("Неизвестное основание")
+    return bool(config.get(f"{feature}_enabled", True))
 
 
 def threshold_ton(config, name, rate):

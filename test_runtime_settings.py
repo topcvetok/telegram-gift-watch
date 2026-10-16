@@ -8,6 +8,9 @@ from runtime_settings import (
     activate_settings,
     active_config,
     effective_config,
+    feature_enabled,
+    set_feature_enabled,
+    set_number_setting,
     set_setting,
     set_source_enabled,
     source_enabled,
@@ -54,6 +57,24 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertTrue(all(source_enabled(current, source) for source in ("tonnel", "portals", "mrkt")))
         set_source_enabled(self.db, "portals", False)
         self.assertFalse(source_enabled(effective_config(self.config, self.db), "portals"))
+
+    def test_special_bases_and_thresholds_are_persistent(self):
+        current = effective_config(self.config, self.db)
+        self.assertTrue(feature_enabled(current, "beautiful_number"))
+        self.assertTrue(feature_enabled(current, "monochrome"))
+        set_feature_enabled(self.db, "monochrome", False)
+        set_number_setting(self.db, "beautiful_number_max_distinct_digits", 2)
+        set_number_setting(self.db, "monochrome_min_score", 85)
+        current = effective_config(self.config, self.db)
+        self.assertFalse(feature_enabled(current, "monochrome"))
+        self.assertEqual(current["beautiful_number_max_distinct_digits"], 2)
+        self.assertEqual(current["monochrome_min_score"], 85)
+
+    def test_special_threshold_ranges_are_validated(self):
+        with self.assertRaisesRegex(ValueError, "от 1 до 10"):
+            set_number_setting(self.db, "beautiful_number_max_distinct_digits", 0)
+        with self.assertRaisesRegex(ValueError, "от 0 до 100"):
+            set_number_setting(self.db, "monochrome_min_score", 101)
 
     def test_active_config_reads_dedicated_settings_connection(self):
         set_setting(self.db, "max_lot_rub", 2750)

@@ -10,9 +10,14 @@ from decimal import Decimal
 
 from bot import ROOT, request_json
 from runtime_settings import (
+    FEATURE_LABELS,
+    NUMBER_SETTING_LABELS,
     SETTING_LABELS,
     SOURCE_LABELS,
     effective_config,
+    feature_enabled,
+    set_feature_enabled,
+    set_number_setting,
     set_setting,
     set_source_enabled,
     source_enabled,
@@ -35,12 +40,19 @@ def settings_text(config, db):
         f"{'✅' if source_enabled(current, source) else '❌'} {label}"
         for source, label in SOURCE_LABELS.items()
     )
+    reasons = "\n".join((
+        f"{'✅' if feature_enabled(current, 'beautiful_number') else '❌'} "
+        f"Красивый номер: ≤ <b>{current.get('beautiful_number_max_distinct_digits', 3)}</b> разных цифр",
+        f"{'✅' if feature_enabled(current, 'monochrome') else '❌'} "
+        f"Монохром: от <b>{current.get('monochrome_min_score', 80)}%</b>",
+    ))
     return (
         "<b>Настройки Gift Watch</b>\n\n"
         f"💰 Максимальная стоимость: <b>{format_threshold(current, 'max_lot')}</b>\n"
         f"📊 Минимальный floor: <b>{format_threshold(current, 'min_floor')}</b>\n\n"
+        f"<b>Основания:</b>\n{reasons}\n\n"
         f"<b>Площадки:</b>\n{sources}\n\n"
-        "Нажми кнопку и отправь цену в рублях или TON. "
+        "Нажми кнопку и отправь новое значение. "
         "Цены и переключатели применяются сразу."
     )
 
@@ -65,6 +77,24 @@ def settings_keyboard(config, db):
         "text": f"{'✅' if source_enabled(current, source) else '❌'} {label}",
         "callback_data": f"settings:toggle:{source}",
     }] for source, label in SOURCE_LABELS.items()]
+    feature_rows = [
+        [{
+            "text": f"{'✅' if feature_enabled(current, 'beautiful_number') else '❌'} Красивый номер",
+            "callback_data": "settings:feature:beautiful_number",
+        }],
+        [{
+            "text": f"🔢 Разных цифр: {current.get('beautiful_number_max_distinct_digits', 3)}",
+            "callback_data": "settings:number:beautiful_number_max_distinct_digits",
+        }],
+        [{
+            "text": f"{'✅' if feature_enabled(current, 'monochrome') else '❌'} Монохром",
+            "callback_data": "settings:feature:monochrome",
+        }],
+        [{
+            "text": f"🎨 Совпадение: от {current.get('monochrome_min_score', 80)}%",
+            "callback_data": "settings:number:monochrome_min_score",
+        }],
+    ]
     return {"inline_keyboard": [
         [{
             "text": "💰 Ввести максимальную стоимость",
@@ -74,6 +104,7 @@ def settings_keyboard(config, db):
             "text": "📊 Ввести минимальный floor",
             "callback_data": "settings:input:min_floor_rub",
         }],
+        *feature_rows,
         *source_rows,
         [{"text": "🔄 Обновить настройки", "callback_data": "settings:refresh"}],
     ]}
@@ -109,15 +140,19 @@ def send_input_prompt(secrets, key, config):
             "Введи максимальную стоимость подарка от 1 ₽. "
             "Например: <b>5000 ₽</b> или <b>25 TON</b>"
         )
-    else:
+    elif key == "min_floor_rub":
         text = "Введи минимальный floor. Например: <b>1200 ₽</b> или <b>6 TON</b>"
+    elif key == "beautiful_number_max_distinct_digits":
+        text = "Сколько разных цифр максимум может быть в красивом номере? Введи число от <b>1</b> до <b>10</b>."
+    else:
+        text = "Введи минимальное совпадение модели и фона от <b>0</b> до <b>100</b> процентов. Для сильного монохрома рекомендуется <b>80</b>."
     return api(secrets, "sendMessage", {
         "chat_id": secrets["chat_id"],
         "text": text,
         "parse_mode": "HTML",
         "reply_markup": {
             "force_reply": True,
-            "input_field_placeholder": "Например: 20 TON",
+            "input_field_placeholder": "Введи новое значение",
         },
         "link_preview_options": {"is_disabled": True},
     })
@@ -132,7 +167,7 @@ def ensure_input_table(db):
 
 
 def begin_input(db, chat_id, key):
-    if key not in SETTING_LABELS:
+    if key not in SETTING_LABELS and key not in NUMBER_SETTING_LABELS:
         raise ValueError("Неизвестная настройка")
     ensure_input_table(db)
     db.execute(
@@ -172,6 +207,13 @@ def normalize_price_text(text, db=None):
     return number, "rub"
 
 
+def normalize_integer_text(text):
+    value = str(text or "").strip().replace("%", "").strip()
+    if not value.isdecimal():
+        raise ValueError("Введи целое число")
+    return int(value)
+
+
 def parse_command(text):
     parts = str(text or "").strip().split()
     if not parts:
@@ -207,6 +249,18 @@ def apply_callback(data, config, db):
         current = effective_config(config, db)
         enabled = set_source_enabled(db, source, not source_enabled(current, source))
         return ("enabled" if enabled else "disabled"), source
+    if len(parts) == 3 and parts[:2] == ["settings", "feature"]:
+        feature = parts[2]
+        current = effective_config(config, db)
+        enabled = set_feature_enabled(
+            db, feature, not feature_enabled(current, feature)
+        )
+        return ("feature_enabled" if enabled else "feature_disabled"), feature
+    if len(parts) == 3 and parts[:2] == ["settings", "number"]:
+        key = parts[2]
+        if key not in NUMBER_SETTING_LABELS:
+            raise ValueError("Неизвестная настройка")
+        return "input", key
     if len(parts) != 3 or parts[:2] != ["settings", "input"]:
         raise ValueError("Неизвестная кнопка")
     key = parts[2]
@@ -227,8 +281,11 @@ def handle_update(update, secrets, config, db):
             command, _ = parse_command(text)
             key = pending_input(db, expected_chat)
             if key is not None and not command.startswith("/"):
-                value, currency = normalize_price_text(text)
-                set_setting(db, key, value, currency=currency)
+                if key in SETTING_LABELS:
+                    value, currency = normalize_price_text(text)
+                    set_setting(db, key, value, currency=currency)
+                else:
+                    set_number_setting(db, key, normalize_integer_text(text))
                 clear_input(db, expected_chat)
                 show_settings(secrets, config, db)
                 return
@@ -255,9 +312,11 @@ def handle_update(update, secrets, config, db):
         action, key = apply_callback(callback.get("data"), config, db)
         if callback_id:
             if action == "input":
-                answer = "Теперь введи цену"
+                answer = "Теперь введи значение"
             elif action in ("enabled", "disabled"):
                 answer = f"{SOURCE_LABELS[key]} {'включён' if action == 'enabled' else 'отключён'}"
+            elif action in ("feature_enabled", "feature_disabled"):
+                answer = f"{FEATURE_LABELS[key]} {'включён' if action == 'feature_enabled' else 'отключён'}"
             else:
                 answer = "Настройки обновлены"
             api(secrets, "answerCallbackQuery", {
