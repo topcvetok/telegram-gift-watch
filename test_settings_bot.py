@@ -136,15 +136,80 @@ class SettingsBotTests(unittest.TestCase):
         self.assertIn("25 TON", settings_bot.settings_text(self.config, self.db))
 
     def test_next_plain_message_saves_requested_price(self):
-        settings_bot.begin_input(self.db, "42", "max_lot_rub")
-        update = {"message": {"chat": {"id": 42}, "text": "25 000 ₽"}}
-        with patch.object(settings_bot, "show_settings") as show:
+        settings_bot.begin_input(self.db, "42", "max_lot_rub", 77)
+        update = {
+            "message": {
+                "chat": {"id": 42}, "message_id": 88, "text": "25 000 ₽"
+            }
+        }
+        with patch.object(settings_bot, "api") as telegram:
             settings_bot.handle_update(
                 update, {"chat_id": 42, "bot_token": "token"}, self.config, self.db
             )
         self.assertEqual(effective_config(self.config, self.db)["max_lot_rub"], 25000)
         self.assertIsNone(settings_bot.pending_input(self.db, "42"))
-        show.assert_called_once()
+        methods = [call.args[1] for call in telegram.call_args_list]
+        self.assertEqual(methods, ["deleteMessage", "editMessageText"])
+        self.assertEqual(telegram.call_args_list[0].args[2]["message_id"], 88)
+        self.assertEqual(telegram.call_args_list[1].args[2]["message_id"], 77)
+
+    def test_callback_updates_the_same_settings_message(self):
+        update = {
+            "callback_query": {
+                "id": "callback-1",
+                "data": "settings:toggle:portals",
+                "message": {"chat": {"id": 42}, "message_id": 77},
+            }
+        }
+        with patch.object(settings_bot, "api") as telegram:
+            settings_bot.handle_update(
+                update, {"chat_id": 42, "bot_token": "token"}, self.config, self.db
+            )
+        methods = [call.args[1] for call in telegram.call_args_list]
+        self.assertEqual(methods, ["answerCallbackQuery", "editMessageText"])
+        self.assertEqual(telegram.call_args_list[1].args[2]["message_id"], 77)
+
+    def test_input_prompt_reuses_settings_message_and_remembers_it(self):
+        update = {
+            "callback_query": {
+                "id": "callback-2",
+                "data": "settings:input:max_lot_rub",
+                "message": {"chat": {"id": 42}, "message_id": 77},
+            }
+        }
+        with patch.object(settings_bot, "api") as telegram:
+            settings_bot.handle_update(
+                update, {"chat_id": 42, "bot_token": "token"}, self.config, self.db
+            )
+        methods = [call.args[1] for call in telegram.call_args_list]
+        self.assertEqual(methods, ["answerCallbackQuery", "editMessageText"])
+        self.assertEqual(settings_bot.pending_input_state(self.db, "42"), ("max_lot_rub", 77))
+        self.assertEqual(telegram.call_args_list[1].args[2]["message_id"], 77)
+
+    def test_existing_input_table_is_migrated_for_message_reuse(self):
+        self.db.execute(
+            "CREATE TABLE settings_input "
+            "(chat_id TEXT PRIMARY KEY, setting_key TEXT NOT NULL)"
+        )
+        self.db.commit()
+        settings_bot.begin_input(self.db, "42", "max_lot_rub", 77)
+        self.assertEqual(
+            settings_bot.pending_input_state(self.db, "42"),
+            ("max_lot_rub", 77),
+        )
+
+    def test_settings_view_is_remembered_for_later_updates(self):
+        secrets = {"chat_id": 42, "bot_token": "token"}
+        with patch.object(
+            settings_bot,
+            "api",
+            side_effect=[{"message_id": 77}, {"message_id": 77}],
+        ) as telegram:
+            settings_bot.show_settings(secrets, self.config, self.db)
+            settings_bot.show_settings(secrets, self.config, self.db)
+        self.assertEqual(telegram.call_args_list[0].args[1], "sendMessage")
+        self.assertEqual(telegram.call_args_list[1].args[1], "editMessageText")
+        self.assertEqual(telegram.call_args_list[1].args[2]["message_id"], 77)
 
 
 if __name__ == "__main__":

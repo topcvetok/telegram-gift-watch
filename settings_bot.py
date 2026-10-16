@@ -30,7 +30,9 @@ def api(secrets, method, payload=None):
         payload or {},
     )
     if not isinstance(result, dict) or result.get("ok") is not True:
-        raise RuntimeError(f"Telegram не подтвердил {method}")
+        description = result.get("description") if isinstance(result, dict) else None
+        detail = f": {description}" if description else ""
+        raise RuntimeError(f"Telegram не подтвердил {method}{detail}")
     return result.get("result")
 
 
@@ -130,7 +132,36 @@ def settings_keyboard(config, db):
     ]}
 
 
+def ensure_view_table(db):
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS settings_view "
+        "(chat_id TEXT PRIMARY KEY, message_id INTEGER NOT NULL)"
+    )
+    db.commit()
+
+
+def remembered_settings_message(db, chat_id):
+    ensure_view_table(db)
+    row = db.execute(
+        "SELECT message_id FROM settings_view WHERE chat_id=?", (str(chat_id),)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def remember_settings_message(db, chat_id, message_id):
+    if message_id is None:
+        return
+    ensure_view_table(db)
+    db.execute(
+        "INSERT OR REPLACE INTO settings_view (chat_id, message_id) VALUES (?, ?)",
+        (str(chat_id), int(message_id)),
+    )
+    db.commit()
+
+
 def show_settings(secrets, config, db, *, message_id=None):
+    if message_id is None:
+        message_id = remembered_settings_message(db, secrets["chat_id"])
     payload = {
         "chat_id": secrets["chat_id"],
         "text": settings_text(config, db),
@@ -142,7 +173,22 @@ def show_settings(secrets, config, db, *, message_id=None):
     if message_id is not None:
         method = "editMessageText"
         payload["message_id"] = message_id
-    return api(secrets, method, payload)
+    try:
+        result = api(secrets, method, payload)
+    except RuntimeError as exc:
+        if "message is not modified" in str(exc):
+            return None
+        if method != "editMessageText":
+            raise
+        payload.pop("message_id", None)
+        result = api(secrets, "sendMessage", payload)
+    returned_message_id = result.get("message_id") if isinstance(result, dict) else None
+    remember_settings_message(
+        db,
+        secrets["chat_id"],
+        returned_message_id if returned_message_id is not None else message_id,
+    )
+    return result
 
 
 def send_text(secrets, text):
@@ -154,7 +200,7 @@ def send_text(secrets, text):
     })
 
 
-def send_input_prompt(secrets, key, config):
+def send_input_prompt(secrets, key, config, *, message_id=None, error=None):
     if key == "max_lot_rub":
         text = (
             "Введи максимальную стоимость подарка от 1 ₽. "
@@ -168,49 +214,79 @@ def send_input_prompt(secrets, key, config):
         text = "На сколько процентов цена монохрома может быть выше floor модели? Введи число от <b>0</b> до <b>100</b>. Сейчас рекомендуется <b>15</b>."
     else:
         text = "Введи минимальное совпадение модели и фона от <b>0</b> до <b>100</b> процентов. Для сильного монохрома рекомендуется <b>80</b>."
-    return api(secrets, "sendMessage", {
+    if error:
+        text = f"⚠️ {error}\n\n{text}"
+    payload = {
         "chat_id": secrets["chat_id"],
         "text": text,
         "parse_mode": "HTML",
         "reply_markup": {
-            "force_reply": True,
-            "input_field_placeholder": "Введи новое значение",
+            "inline_keyboard": [[{
+                "text": "↩️ Отменить ввод",
+                "callback_data": "settings:cancel",
+            }]],
         },
         "link_preview_options": {"is_disabled": True},
-    })
+    }
+    method = "sendMessage"
+    if message_id is not None:
+        method = "editMessageText"
+        payload["message_id"] = message_id
+    return api(secrets, method, payload)
 
 
 def ensure_input_table(db):
     db.execute(
         "CREATE TABLE IF NOT EXISTS settings_input "
-        "(chat_id TEXT PRIMARY KEY, setting_key TEXT NOT NULL)"
+        "(chat_id TEXT PRIMARY KEY, setting_key TEXT NOT NULL, message_id INTEGER)"
     )
+    columns = {row[1] for row in db.execute("PRAGMA table_info(settings_input)")}
+    if "message_id" not in columns:
+        db.execute("ALTER TABLE settings_input ADD COLUMN message_id INTEGER")
     db.commit()
 
 
-def begin_input(db, chat_id, key):
+def begin_input(db, chat_id, key, message_id=None):
     if key not in SETTING_LABELS and key not in NUMBER_SETTING_LABELS:
         raise ValueError("Неизвестная настройка")
     ensure_input_table(db)
     db.execute(
-        "INSERT OR REPLACE INTO settings_input (chat_id, setting_key) VALUES (?, ?)",
-        (str(chat_id), key),
+        "INSERT OR REPLACE INTO settings_input "
+        "(chat_id, setting_key, message_id) VALUES (?, ?, ?)",
+        (str(chat_id), key, message_id),
     )
     db.commit()
 
 
 def pending_input(db, chat_id):
+    return pending_input_state(db, chat_id)[0]
+
+
+def pending_input_state(db, chat_id):
     ensure_input_table(db)
     row = db.execute(
-        "SELECT setting_key FROM settings_input WHERE chat_id=?", (str(chat_id),)
+        "SELECT setting_key, message_id FROM settings_input WHERE chat_id=?",
+        (str(chat_id),),
     ).fetchone()
-    return row[0] if row else None
+    return (row[0], row[1]) if row else (None, None)
 
 
 def clear_input(db, chat_id):
     ensure_input_table(db)
     db.execute("DELETE FROM settings_input WHERE chat_id=?", (str(chat_id),))
     db.commit()
+
+
+def delete_message(secrets, message_id):
+    if message_id is None:
+        return
+    try:
+        api(secrets, "deleteMessage", {
+            "chat_id": secrets["chat_id"],
+            "message_id": message_id,
+        })
+    except RuntimeError:
+        pass
 
 
 def normalize_price_text(text, db=None):
@@ -265,6 +341,8 @@ def apply_command(text, config, db):
 def apply_callback(data, config, db):
     if data == "settings:refresh":
         return "refresh", None
+    if data == "settings:cancel":
+        return "cancel", None
     parts = str(data or "").split(":")
     if len(parts) == 3 and parts[:2] == ["settings", "toggle"]:
         source = parts[2]
@@ -298,10 +376,10 @@ def handle_update(update, secrets, config, db):
         chat = message.get("chat")
         if not isinstance(chat, dict) or str(chat.get("id")) != expected_chat:
             return
+        key, settings_message_id = pending_input_state(db, expected_chat)
         try:
             text = message.get("text")
             command, _ = parse_command(text)
-            key = pending_input(db, expected_chat)
             if key is not None and not command.startswith("/"):
                 if key in SETTING_LABELS:
                     value, currency = normalize_price_text(text)
@@ -309,17 +387,36 @@ def handle_update(update, secrets, config, db):
                 else:
                     set_number_setting(db, key, normalize_integer_text(text))
                 clear_input(db, expected_chat)
-                show_settings(secrets, config, db)
+                delete_message(secrets, message.get("message_id"))
+                show_settings(
+                    secrets, config, db, message_id=settings_message_id
+                )
                 return
             action = apply_command(text, config, db)
             if action == "settings":
                 clear_input(db, expected_chat)
-                show_settings(secrets, config, db)
+                delete_message(secrets, message.get("message_id"))
+                show_settings(
+                    secrets, config, db, message_id=settings_message_id
+                )
             elif action == "cancel":
                 clear_input(db, expected_chat)
-                show_settings(secrets, config, db)
+                delete_message(secrets, message.get("message_id"))
+                show_settings(
+                    secrets, config, db, message_id=settings_message_id
+                )
         except ValueError as exc:
-            send_text(secrets, f"{exc}\nПопробуй ещё раз или отправь /cancel.")
+            if key is not None and settings_message_id is not None:
+                delete_message(secrets, message.get("message_id"))
+                send_input_prompt(
+                    secrets,
+                    key,
+                    config,
+                    message_id=settings_message_id,
+                    error=str(exc),
+                )
+            else:
+                send_text(secrets, f"{exc}\nПопробуй ещё раз или отправь /cancel.")
         return
 
     callback = update.get("callback_query") if isinstance(update, dict) else None
@@ -330,11 +427,14 @@ def handle_update(update, secrets, config, db):
     if not isinstance(chat, dict) or str(chat.get("id")) != expected_chat:
         return
     callback_id = callback.get("id")
+    settings_message_id = callback_message.get("message_id")
     try:
         action, key = apply_callback(callback.get("data"), config, db)
         if callback_id:
             if action == "input":
                 answer = "Теперь введи значение"
+            elif action == "cancel":
+                answer = "Ввод отменён"
             elif action in ("enabled", "disabled"):
                 answer = f"{SOURCE_LABELS[key]} {'включён' if action == 'enabled' else 'отключён'}"
             elif action in ("feature_enabled", "feature_disabled"):
@@ -346,10 +446,16 @@ def handle_update(update, secrets, config, db):
                 "text": answer,
             })
         if action == "input":
-            begin_input(db, expected_chat, key)
-            send_input_prompt(secrets, key, config)
+            begin_input(db, expected_chat, key, settings_message_id)
+            send_input_prompt(
+                secrets, key, config, message_id=settings_message_id
+            )
         else:
-            show_settings(secrets, config, db)
+            if action == "cancel":
+                clear_input(db, expected_chat)
+            show_settings(
+                secrets, config, db, message_id=settings_message_id
+            )
     except ValueError as exc:
         if callback_id:
             api(secrets, "answerCallbackQuery", {
