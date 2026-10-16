@@ -36,7 +36,9 @@ jobs:
         with:
           path: |
             state.sqlite3
+            state.sqlite3-wal
             settings.sqlite3
+            settings.sqlite3-wal
           key: gift-watch-state-${{ github.run_id }}
           restore-keys: gift-watch-state-
 
@@ -100,13 +102,19 @@ jobs:
           wait "${settings_pid}" "${portals_pid}" "${tonnel_pid}" 2>/dev/null || true
           exit "${status}"
 
+      - name: Checkpoint SQLite databases
+        if: always()
+        run: python checkpoint_sqlite.py
+
       - name: Save monitor state
         if: always()
         uses: actions/cache/save@v4
         with:
           path: |
             state.sqlite3
+            state.sqlite3-wal
             settings.sqlite3
+            settings.sqlite3-wal
           key: gift-watch-state-${{ github.run_id }}
 
       - name: Remove older state caches
