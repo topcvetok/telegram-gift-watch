@@ -297,7 +297,7 @@ def score(item, floor_book, rate, config):
 def best_score(item, collection_book, variant_books, rate, config):
     results = []
     collection_result = score(item, collection_book, rate, config)
-    if collection_result is not None:
+    if collection_result is not None and config.get("collection_basis_enabled", True):
         collection_result["basis"] = "вся коллекция"
         collection_result["basis_scope"] = "collection"
         collection_result["basis_trait"] = item.get("name")
@@ -309,6 +309,7 @@ def best_score(item, collection_book, variant_books, rate, config):
         "variant_floor_cluster_max_spread_fraction"
     ]
     labels = {"model": "модель", "backdrop": "фон"}
+    model_result = None
     for scope, label in labels.items():
         trait = item.get(scope)
         if scope == "backdrop" and not allowed_backdrop(trait):
@@ -321,8 +322,17 @@ def best_score(item, collection_book, variant_books, rate, config):
             result["basis"] = f"{label}: {trait}"
             result["basis_scope"] = scope
             result["basis_trait"] = trait
-            results.append(result)
+            if scope == "model":
+                model_result = result
+            if config.get(f"{scope}_basis_enabled", True):
+                results.append(result)
     if not results:
+        special_enabled = bool(config.get("beautiful_number_enabled", False)) or bool(
+            config.get("monochrome_enabled", False)
+        )
+        if special_enabled and model_result is not None:
+            model_result["_requires_special_basis"] = True
+            return model_result
         return None
     return max(results, key=lambda result: (result["profit_rub"], result["discount"]))
 

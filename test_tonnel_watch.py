@@ -147,6 +147,43 @@ class TonnelScoringTests(unittest.TestCase):
             with self.subTest(backdrop=backdrop):
                 self.assertTrue(watch.allowed_backdrop(backdrop))
 
+    def test_collection_model_and_backdrop_bases_can_be_disabled(self):
+        collection_item = gift(1, 2.5)
+        disabled_collection = dict(self.config, collection_basis_enabled=False)
+        self.assertIsNone(watch.best_score(
+            collection_item, self.floor, {}, Decimal("124.42"), disabled_collection
+        ))
+
+        model_item = gift(1, 5.0, model="Rare Model (1%)")
+        model_book = [
+            gift(i, price, model="Rare Model (1%)")
+            for i, price in enumerate([7.0, 7.1, 7.2, 7.3], 20)
+        ]
+        disabled_model = dict(
+            self.config,
+            collection_basis_enabled=False,
+            model_basis_enabled=False,
+            beautiful_number_enabled=False,
+            monochrome_enabled=False,
+        )
+        self.assertIsNone(watch.best_score(
+            model_item, [], {("model", "Rare Model (1%)"): model_book},
+            Decimal("124.42"), disabled_model,
+        ))
+
+        backdrop_item = gift(1, 5.0, backdrop="Black")
+        backdrop_book = [
+            gift(i, price, backdrop="Black")
+            for i, price in enumerate([7.0, 7.1, 7.2, 7.3], 20)
+        ]
+        disabled_backdrop = dict(
+            self.config, collection_basis_enabled=False, backdrop_basis_enabled=False
+        )
+        self.assertIsNone(watch.best_score(
+            backdrop_item, [], {("backdrop", "Black"): backdrop_book},
+            Decimal("124.42"), disabled_backdrop,
+        ))
+
     def test_rate_limit_is_not_retried_immediately(self):
         class Response:
             status_code = 429

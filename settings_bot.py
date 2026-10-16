@@ -41,6 +41,9 @@ def settings_text(config, db):
         for source, label in SOURCE_LABELS.items()
     )
     reasons = "\n".join((
+        f"{'✅' if feature_enabled(current, 'collection_basis') else '❌'} Floor коллекции",
+        f"{'✅' if feature_enabled(current, 'model_basis') else '❌'} Floor модели",
+        f"{'✅' if feature_enabled(current, 'backdrop_basis') else '❌'} Цвет фона",
         f"{'✅' if feature_enabled(current, 'beautiful_number') else '❌'} "
         f"Красивый номер: ≤ <b>{current.get('beautiful_number_max_distinct_digits', 3)}</b> разных цифр",
         f"{'✅' if feature_enabled(current, 'monochrome') else '❌'} "
@@ -78,6 +81,18 @@ def settings_keyboard(config, db):
         "callback_data": f"settings:toggle:{source}",
     }] for source, label in SOURCE_LABELS.items()]
     feature_rows = [
+        [{
+            "text": f"{'✅' if feature_enabled(current, 'collection_basis') else '❌'} Floor коллекции",
+            "callback_data": "settings:feature:collection_basis",
+        }],
+        [{
+            "text": f"{'✅' if feature_enabled(current, 'model_basis') else '❌'} Floor модели",
+            "callback_data": "settings:feature:model_basis",
+        }],
+        [{
+            "text": f"{'✅' if feature_enabled(current, 'backdrop_basis') else '❌'} Цвет фона",
+            "callback_data": "settings:feature:backdrop_basis",
+        }],
         [{
             "text": f"{'✅' if feature_enabled(current, 'beautiful_number') else '❌'} Красивый номер",
             "callback_data": "settings:feature:beautiful_number",

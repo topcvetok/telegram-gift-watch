@@ -60,13 +60,18 @@ class RuntimeSettingsTests(unittest.TestCase):
 
     def test_special_bases_and_thresholds_are_persistent(self):
         current = effective_config(self.config, self.db)
+        self.assertTrue(feature_enabled(current, "collection_basis"))
+        self.assertTrue(feature_enabled(current, "model_basis"))
+        self.assertTrue(feature_enabled(current, "backdrop_basis"))
         self.assertTrue(feature_enabled(current, "beautiful_number"))
         self.assertTrue(feature_enabled(current, "monochrome"))
         set_feature_enabled(self.db, "monochrome", False)
+        set_feature_enabled(self.db, "collection_basis", False)
         set_number_setting(self.db, "beautiful_number_max_distinct_digits", 2)
         set_number_setting(self.db, "monochrome_min_score", 85)
         current = effective_config(self.config, self.db)
         self.assertFalse(feature_enabled(current, "monochrome"))
+        self.assertFalse(feature_enabled(current, "collection_basis"))
         self.assertEqual(current["beautiful_number_max_distinct_digits"], 2)
         self.assertEqual(current["monochrome_min_score"], 85)
 

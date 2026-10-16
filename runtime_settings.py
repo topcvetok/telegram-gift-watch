@@ -15,6 +15,9 @@ SOURCE_LABELS = {
     "mrkt": "MRKT",
 }
 FEATURE_LABELS = {
+    "collection_basis": "Floor коллекции",
+    "model_basis": "Floor модели",
+    "backdrop_basis": "Цвет фона",
     "beautiful_number": "Красивый номер",
     "monochrome": "Монохром",
 }

@@ -60,6 +60,9 @@ class SettingsBotTests(unittest.TestCase):
         self.assertIn("✅ Tonnel", labels)
         self.assertIn("✅ Portals", labels)
         self.assertIn("✅ MRKT", labels)
+        self.assertIn("✅ Floor коллекции", labels)
+        self.assertIn("✅ Floor модели", labels)
+        self.assertIn("✅ Цвет фона", labels)
         self.assertIn("✅ Красивый номер", labels)
         self.assertIn("🔢 Разных цифр: 3", labels)
         self.assertIn("✅ Монохром", labels)
@@ -82,6 +85,12 @@ class SettingsBotTests(unittest.TestCase):
         )
 
     def test_special_basis_buttons_toggle_and_accept_free_values(self):
+        self.assertEqual(
+            settings_bot.apply_callback(
+                "settings:feature:model_basis", self.config, self.db
+            ),
+            ("feature_disabled", "model_basis"),
+        )
         self.assertEqual(
             settings_bot.apply_callback(
                 "settings:feature:monochrome", self.config, self.db

@@ -73,6 +73,22 @@ class SpecialTraitsTests(unittest.TestCase):
         self.assertEqual(enriched["basis"], "модель: Weedcat")
         self.assertEqual(enriched["monochrome_score"], 79)
 
+    def test_special_basis_can_validate_model_floor_when_model_basis_is_off(self):
+        pending = dict(self.result, _requires_special_basis=True)
+        config = {
+            "beautiful_number_enabled": True,
+            "beautiful_number_max_distinct_digits": 3,
+            "monochrome_enabled": False,
+        }
+        enriched = apply_special_bases(self.item, pending, config, self.db)
+        self.assertIn("красивый номер #12121", enriched["basis"])
+        self.assertNotIn("_requires_special_basis", enriched)
+
+        ordinary = {"name": "Scared Cat", "gift_num": 12345}
+        self.assertIsNone(apply_special_bases(
+            ordinary, pending, config, self.db
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()
