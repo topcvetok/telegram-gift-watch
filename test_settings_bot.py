@@ -67,6 +67,7 @@ class SettingsBotTests(unittest.TestCase):
         self.assertIn("🔢 Разных цифр: 3", labels)
         self.assertIn("✅ Монохром", labels)
         self.assertIn("🎨 Совпадение: от 80%", labels)
+        self.assertIn("📈 Монохром до +15% к floor", labels)
         self.assertNotIn("2 000 ₽", " ".join(labels))
 
     def test_market_button_toggles_source(self):
@@ -102,6 +103,14 @@ class SettingsBotTests(unittest.TestCase):
                 "settings:number:monochrome_min_score", self.config, self.db
             ),
             ("input", "monochrome_min_score"),
+        )
+        self.assertEqual(
+            settings_bot.apply_callback(
+                "settings:number:monochrome_max_floor_premium_percent",
+                self.config,
+                self.db,
+            ),
+            ("input", "monochrome_max_floor_premium_percent"),
         )
         settings_bot.begin_input(self.db, "42", "monochrome_min_score")
         update = {"message": {"chat": {"id": 42}, "text": "85%"}}

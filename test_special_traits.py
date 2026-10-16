@@ -89,6 +89,27 @@ class SpecialTraitsTests(unittest.TestCase):
             ordinary, pending, config, self.db
         ))
 
+    def test_relaxed_monochrome_candidate_requires_monochrome_match(self):
+        pending = dict(
+            self.result,
+            _requires_monochrome_basis=True,
+            monochrome_relaxed=True,
+        )
+        config = {
+            "beautiful_number_enabled": True,
+            "beautiful_number_max_distinct_digits": 3,
+            "monochrome_enabled": True,
+            "monochrome_min_score": 80,
+        }
+        self.assertIsNone(apply_special_bases(
+            self.item, pending, config, self.db, fetch=lambda slug: 79
+        ))
+        matched_item = {"name": "Scared Cat", "gift_num": 12122}
+        matched = apply_special_bases(
+            matched_item, pending, config, self.db, fetch=lambda slug: 85
+        )
+        self.assertIn("монохром 85%", matched["basis"])
+
 
 if __name__ == "__main__":
     unittest.main()

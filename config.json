@@ -10,6 +10,7 @@
   "beautiful_number_max_distinct_digits": 3,
   "monochrome_enabled": true,
   "monochrome_min_score": 80,
+  "monochrome_max_floor_premium_percent": 15,
   "monochrome_cache_seconds": 2592000,
   "monochrome_retry_seconds": 3600,
   "min_scenario_profit_rub": 100,

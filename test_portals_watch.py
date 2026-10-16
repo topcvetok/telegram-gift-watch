@@ -168,6 +168,22 @@ class PortalsTests(unittest.TestCase):
             "https://t.me/portals/market?startapp=gift_p1",
         )
 
+    def test_relaxed_monochrome_alert_shows_floor_tolerance_instead_of_profit(self):
+        item = watch.portals_item(raw_gift())
+        result = {
+            "price": Decimal("11.5"), "rate": Decimal("100"),
+            "basis": "монохром 86%; floor: модель: Watcher",
+            "basis_scope": "model", "next_floor": Decimal("10"),
+            "liquidity": "низкая", "collection_sales_24h": 0,
+            "resale": Decimal("9.99"), "profit_rub": Decimal("-170"),
+            "monochrome_relaxed": True,
+            "monochrome_floor_delta_fraction": Decimal("0.15"),
+            "monochrome_max_floor_premium_fraction": Decimal("0.15"),
+        }
+        text = watch.format_alert(item, result, self.config)
+        self.assertIn("Цена относительно floor модели: +15.0%", text)
+        self.assertNotIn("Расчётная прибыль", text)
+
     def test_same_or_higher_price_is_not_sent_twice(self):
         db = sqlite3.connect(":memory:")
         item = watch.portals_item(raw_gift())

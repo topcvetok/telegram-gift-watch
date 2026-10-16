@@ -184,6 +184,33 @@ class TonnelScoringTests(unittest.TestCase):
             Decimal("124.42"), disabled_backdrop,
         ))
 
+    def test_monochrome_can_be_up_to_fifteen_percent_above_model_floor(self):
+        model = "Weedcat (3%)"
+        model_book = [
+            gift(i, price, model=model)
+            for i, price in enumerate([7.0, 7.1, 7.2, 7.3], 20)
+        ]
+        config = dict(
+            self.config,
+            collection_basis_enabled=False,
+            model_basis_enabled=True,
+            beautiful_number_enabled=False,
+            monochrome_enabled=True,
+            monochrome_max_floor_premium_percent=15,
+        )
+        result = watch.best_score(
+            gift(1, 8.05, model=model), [], {("model", model): model_book},
+            Decimal("100"), config,
+        )
+        self.assertIsNotNone(result)
+        self.assertTrue(result["monochrome_relaxed"])
+        self.assertTrue(result["_requires_monochrome_basis"])
+
+        self.assertIsNone(watch.best_score(
+            gift(1, 8.051, model=model), [], {("model", model): model_book},
+            Decimal("100"), config,
+        ))
+
     def test_rate_limit_is_not_retried_immediately(self):
         class Response:
             status_code = 429

@@ -69,17 +69,21 @@ class RuntimeSettingsTests(unittest.TestCase):
         set_feature_enabled(self.db, "collection_basis", False)
         set_number_setting(self.db, "beautiful_number_max_distinct_digits", 2)
         set_number_setting(self.db, "monochrome_min_score", 85)
+        set_number_setting(self.db, "monochrome_max_floor_premium_percent", 15)
         current = effective_config(self.config, self.db)
         self.assertFalse(feature_enabled(current, "monochrome"))
         self.assertFalse(feature_enabled(current, "collection_basis"))
         self.assertEqual(current["beautiful_number_max_distinct_digits"], 2)
         self.assertEqual(current["monochrome_min_score"], 85)
+        self.assertEqual(current["monochrome_max_floor_premium_percent"], 15)
 
     def test_special_threshold_ranges_are_validated(self):
         with self.assertRaisesRegex(ValueError, "от 1 до 10"):
             set_number_setting(self.db, "beautiful_number_max_distinct_digits", 0)
         with self.assertRaisesRegex(ValueError, "от 0 до 100"):
             set_number_setting(self.db, "monochrome_min_score", 101)
+        with self.assertRaisesRegex(ValueError, "от 0 до 100"):
+            set_number_setting(self.db, "monochrome_max_floor_premium_percent", 101)
 
     def test_active_config_reads_dedicated_settings_connection(self):
         set_setting(self.db, "max_lot_rub", 2750)

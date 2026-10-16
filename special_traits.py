@@ -94,6 +94,8 @@ def apply_special_bases(item, result, config, db, fetch=fetch_monochrome_score):
     labels = []
     enriched = dict(result)
     requires_special = bool(enriched.pop("_requires_special_basis", False))
+    requires_monochrome = bool(enriched.pop("_requires_monochrome_basis", False))
+    monochrome_match = False
     number_match = beautiful_number(item, config)
     if number_match:
         number, distinct = number_match
@@ -113,11 +115,12 @@ def apply_special_bases(item, result, config, db, fetch=fetch_monochrome_score):
             enriched["monochrome_score"] = score
             if score >= minimum:
                 labels.append(f"монохром {score:g}%")
+                monochrome_match = True
 
-    if labels:
+    if labels and (not requires_monochrome or monochrome_match):
         floor_basis = str(result.get("basis") or "стабильный floor")
         enriched["basis"] = f"{', '.join(labels)}; floor: {floor_basis}"
         enriched["special_basis"] = labels
-    elif requires_special:
+    elif requires_special or requires_monochrome:
         return None
     return enriched

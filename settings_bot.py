@@ -47,7 +47,8 @@ def settings_text(config, db):
         f"{'✅' if feature_enabled(current, 'beautiful_number') else '❌'} "
         f"Красивый номер: ≤ <b>{current.get('beautiful_number_max_distinct_digits', 3)}</b> разных цифр",
         f"{'✅' if feature_enabled(current, 'monochrome') else '❌'} "
-        f"Монохром: от <b>{current.get('monochrome_min_score', 80)}%</b>",
+        f"Монохром: от <b>{current.get('monochrome_min_score', 80)}%</b>, "
+        f"цена до <b>+{current.get('monochrome_max_floor_premium_percent', 15)}%</b> к floor модели",
     ))
     return (
         "<b>Настройки Gift Watch</b>\n\n"
@@ -109,6 +110,10 @@ def settings_keyboard(config, db):
             "text": f"🎨 Совпадение: от {current.get('monochrome_min_score', 80)}%",
             "callback_data": "settings:number:monochrome_min_score",
         }],
+        [{
+            "text": f"📈 Монохром до +{current.get('monochrome_max_floor_premium_percent', 15)}% к floor",
+            "callback_data": "settings:number:monochrome_max_floor_premium_percent",
+        }],
     ]
     return {"inline_keyboard": [
         [{
@@ -159,6 +164,8 @@ def send_input_prompt(secrets, key, config):
         text = "Введи минимальный floor. Например: <b>1200 ₽</b> или <b>6 TON</b>"
     elif key == "beautiful_number_max_distinct_digits":
         text = "Сколько разных цифр максимум может быть в красивом номере? Введи число от <b>1</b> до <b>10</b>."
+    elif key == "monochrome_max_floor_premium_percent":
+        text = "На сколько процентов цена монохрома может быть выше floor модели? Введи число от <b>0</b> до <b>100</b>. Сейчас рекомендуется <b>15</b>."
     else:
         text = "Введи минимальное совпадение модели и фона от <b>0</b> до <b>100</b> процентов. Для сильного монохрома рекомендуется <b>80</b>."
     return api(secrets, "sendMessage", {

@@ -24,10 +24,12 @@ FEATURE_LABELS = {
 NUMBER_SETTING_LABELS = {
     "beautiful_number_max_distinct_digits": "максимум разных цифр в номере",
     "monochrome_min_score": "минимальное совпадение монохрома",
+    "monochrome_max_floor_premium_percent": "допустимое превышение floor для монохрома",
 }
 NUMBER_SETTING_RANGES = {
     "beautiful_number_max_distinct_digits": (1, 10),
     "monochrome_min_score": (0, 100),
+    "monochrome_max_floor_premium_percent": (0, 100),
 }
 
 _ACTIVE_SETTINGS_DB = None

@@ -239,7 +239,7 @@ def eligible(item):
     )
 
 
-def score(item, floor_book, rate, config):
+def floor_evidence(item, floor_book, rate, config):
     if not eligible(item):
         return None
     price = decimal(item["price"], "цена покупки")
@@ -266,22 +266,14 @@ def score(item, floor_book, rate, config):
     if next_floor < min_floor_ton:
         return None
     discount = (next_floor - price) / next_floor
-    if discount < decimal(config["min_discount_fraction"], "минимальная скидка"):
-        return None
     undercut = decimal(config["undercut_ton"], "шаг снижения цены")
     resale = max(Decimal("0"), next_floor - undercut)
     cost_fraction = decimal(config["tonnel_round_trip_cost_fraction"], "резерв расходов")
     fixed_cost = decimal(config["fixed_cost_ton"], "фиксированные расходы")
     net_sale = resale * (1 - cost_fraction) - fixed_cost
     profit_ton = net_sale - price
-    if profit_ton <= 0:
-        return None
     profit_rub = profit_ton * rate
     roi = profit_ton / price
-    if profit_rub < decimal(config["min_scenario_profit_rub"], "минимальная прибыль"):
-        return None
-    if roi < decimal(config["min_roi_fraction"], "минимальная доходность"):
-        return None
     return {
         "price": price,
         "next_floor": next_floor,
@@ -292,6 +284,43 @@ def score(item, floor_book, rate, config):
         "roi": roi,
         "rate": rate,
     }
+
+
+def score(item, floor_book, rate, config):
+    result = floor_evidence(item, floor_book, rate, config)
+    if result is None:
+        return None
+    if result["discount"] < decimal(
+        config["min_discount_fraction"], "минимальная скидка"
+    ):
+        return None
+    if result["profit_ton"] <= 0:
+        return None
+    if result["profit_rub"] < decimal(
+        config["min_scenario_profit_rub"], "минимальная прибыль"
+    ):
+        return None
+    if result["roi"] < decimal(config["min_roi_fraction"], "минимальная доходность"):
+        return None
+    return result
+
+
+def monochrome_floor_score(item, model_book, rate, config):
+    result = floor_evidence(item, model_book, rate, config)
+    if result is None:
+        return None
+    maximum = decimal(
+        config.get("monochrome_max_floor_premium_percent", 15),
+        "допуск монохрома к floor",
+    ) / 100
+    if result["price"] > result["next_floor"] * (1 + maximum):
+        return None
+    result["monochrome_relaxed"] = True
+    result["monochrome_floor_delta_fraction"] = (
+        result["price"] - result["next_floor"]
+    ) / result["next_floor"]
+    result["monochrome_max_floor_premium_fraction"] = maximum
+    return result
 
 
 def best_score(item, collection_book, variant_books, rate, config):
@@ -310,6 +339,7 @@ def best_score(item, collection_book, variant_books, rate, config):
     ]
     labels = {"model": "модель", "backdrop": "фон"}
     model_result = None
+    monochrome_result = None
     for scope, label in labels.items():
         trait = item.get(scope)
         if scope == "backdrop" and not allowed_backdrop(trait):
@@ -318,6 +348,10 @@ def best_score(item, collection_book, variant_books, rate, config):
         if not book:
             continue
         result = score(item, book, rate, variant_config)
+        if scope == "model" and config.get("monochrome_enabled", False):
+            monochrome_result = monochrome_floor_score(
+                item, book, rate, variant_config
+            )
         if result is not None:
             result["basis"] = f"{label}: {trait}"
             result["basis_scope"] = scope
@@ -333,6 +367,12 @@ def best_score(item, collection_book, variant_books, rate, config):
         if special_enabled and model_result is not None:
             model_result["_requires_special_basis"] = True
             return model_result
+        if monochrome_result is not None:
+            monochrome_result["basis"] = f"модель: {item.get('model')}"
+            monochrome_result["basis_scope"] = "model"
+            monochrome_result["basis_trait"] = item.get("model")
+            monochrome_result["_requires_monochrome_basis"] = True
+            return monochrome_result
         return None
     return max(results, key=lambda result: (result["profit_rub"], result["discount"]))
 
@@ -489,12 +529,13 @@ def apply_sales_evidence(item, result, db, config, now=None):
         profit_ton = resale * (1 - cost_fraction) - fixed_cost - enriched["price"]
         profit_rub = profit_ton * enriched["rate"]
         roi = profit_ton / enriched["price"] if enriched["price"] > 0 else Decimal("0")
-        if profit_ton <= 0:
-            return None
-        if profit_rub < decimal(config["min_scenario_profit_rub"], "минимальная прибыль"):
-            return None
-        if roi < decimal(config["min_roi_fraction"], "минимальная доходность"):
-            return None
+        if not enriched.get("monochrome_relaxed"):
+            if profit_ton <= 0:
+                return None
+            if profit_rub < decimal(config["min_scenario_profit_rub"], "минимальная прибыль"):
+                return None
+            if roi < decimal(config["min_roi_fraction"], "минимальная доходность"):
+                return None
         enriched.update({
             "resale": resale,
             "profit_ton": profit_ton,

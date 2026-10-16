@@ -48,6 +48,19 @@ def format_market_alert(item, result, *, market):
     if other:
         activity_line += f" · прочие события: {other}"
 
+    if result.get("monochrome_relaxed"):
+        delta = result.get("monochrome_floor_delta_fraction", 0) * 100
+        maximum = result.get("monochrome_max_floor_premium_fraction", 0) * 100
+        scenario_line = (
+            f"Цена относительно floor модели: {delta:+.1f}% "
+            f"(допуск для монохрома до +{maximum:.0f}%)"
+        )
+    else:
+        scenario_line = (
+            f"Расчётная прибыль: {result['profit_rub']:.0f} ₽ "
+            f"при быстрой продаже за {_ton(result['resale'])}"
+        )
+
     lines = [
         f"<b>оффер на {escape(market)}</b>",
         "",
@@ -63,7 +76,6 @@ def format_market_alert(item, result, *, market):
         f"<b>Ликвидность:</b> {liquidity} (активность за 24 ч: {activity})",
         activity_line,
         "",
-        f"Расчётная прибыль: {result['profit_rub']:.0f} ₽ "
-        f"при быстрой продаже за {_ton(result['resale'])}",
+        scenario_line,
     ]
     return "\n".join(lines)
