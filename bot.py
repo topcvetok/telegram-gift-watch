@@ -169,13 +169,21 @@ def telegram(secrets, text, *, preview_url=None, button_url=None):
     return message_id if isinstance(message_id, int) and message_id > 0 else None
 
 
-def telegram_edit(secrets, message_id, text):
+def telegram_edit(secrets, message_id, text, *, preview_url=None):
+    preview_options = {"is_disabled": True}
+    if preview_url:
+        preview_options = {
+            "is_disabled": False,
+            "url": preview_url,
+            "prefer_large_media": True,
+            "show_above_text": True,
+        }
     payload = {
         "chat_id": secrets["chat_id"],
         "message_id": int(message_id),
         "text": text,
         "parse_mode": "HTML",
-        "link_preview_options": {"is_disabled": True},
+        "link_preview_options": preview_options,
         "reply_markup": {"inline_keyboard": []},
     }
     result = request_json(

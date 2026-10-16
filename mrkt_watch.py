@@ -299,7 +299,9 @@ def send_if_new_price(item, result, config, secrets, db, send=True):
     message_id = telegram(
         secrets, text, preview_url=preview_url, button_url=listing_link(item)
     )
-    remember_alert(db, "MRKT", item, result, message_id)
+    remember_alert(
+        db, "MRKT", item, result, message_id, preview_url=preview_url
+    )
     db.execute(
         "INSERT OR REPLACE INTO mrkt_alerts VALUES (?, ?, ?)",
         (key, str(result["price"]), time.time()),

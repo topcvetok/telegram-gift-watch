@@ -91,16 +91,25 @@ class SignalTests(unittest.TestCase):
             "inline_keyboard": [[{"text": "Открыть оффер", "url": offer}]]
         })
 
-    def test_telegram_edit_removes_offer_button_and_preview(self):
+    def test_telegram_edit_keeps_gift_preview_and_removes_offer_button(self):
+        preview = "https://t.me/nft/plushpepe-1098"
         with patch.object(bot, "request_json", return_value={"ok": True}) as request:
             self.assertTrue(bot.telegram_edit(
-                {"bot_token": "1:test", "chat_id": "42"}, 321, "sold"
+                {"bot_token": "1:test", "chat_id": "42"},
+                321,
+                "sold",
+                preview_url=preview,
             ))
         self.assertIn("editMessageText", request.call_args.args[0])
         payload = request.call_args.args[1]
         self.assertEqual(payload["message_id"], 321)
         self.assertEqual(payload["reply_markup"], {"inline_keyboard": []})
-        self.assertTrue(payload["link_preview_options"]["is_disabled"])
+        self.assertEqual(payload["link_preview_options"], {
+            "is_disabled": False,
+            "url": preview,
+            "prefer_large_media": True,
+            "show_above_text": True,
+        })
 
 
 if __name__ == "__main__":
