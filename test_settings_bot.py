@@ -4,7 +4,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import settings_bot
-from runtime_settings import effective_config
+from runtime_settings import effective_config, is_authorized, set_setting
 
 
 class SettingsBotTests(unittest.TestCase):
@@ -118,7 +118,10 @@ class SettingsBotTests(unittest.TestCase):
             settings_bot.handle_update(
                 update, {"chat_id": 42, "bot_token": "token"}, self.config, self.db
             )
-        self.assertEqual(effective_config(self.config, self.db)["monochrome_min_score"], 85)
+        self.assertEqual(
+            effective_config(self.config, self.db, "42")["monochrome_min_score"],
+            85,
+        )
         show.assert_called_once()
 
     def test_price_text_accepts_spaces_and_ruble_sign(self):
@@ -146,7 +149,10 @@ class SettingsBotTests(unittest.TestCase):
             settings_bot.handle_update(
                 update, {"chat_id": 42, "bot_token": "token"}, self.config, self.db
             )
-        self.assertEqual(effective_config(self.config, self.db)["max_lot_rub"], 25000)
+        self.assertEqual(
+            effective_config(self.config, self.db, "42")["max_lot_rub"],
+            25000,
+        )
         self.assertIsNone(settings_bot.pending_input(self.db, "42"))
         methods = [call.args[1] for call in telegram.call_args_list]
         self.assertEqual(methods, ["deleteMessage", "editMessageText"])
@@ -210,6 +216,63 @@ class SettingsBotTests(unittest.TestCase):
         self.assertEqual(telegram.call_args_list[0].args[1], "sendMessage")
         self.assertEqual(telegram.call_args_list[1].args[1], "editMessageText")
         self.assertEqual(telegram.call_args_list[1].args[2]["message_id"], 77)
+
+    def test_join_code_authorizes_guest_with_independent_settings(self):
+        set_setting(self.db, "max_lot_rub", 3000, chat_id="42")
+        secrets = {
+            "chat_id": 42,
+            "bot_token": "token",
+            "access_code": "family-code",
+        }
+        join = {
+            "message": {
+                "chat": {"id": 99},
+                "message_id": 7,
+                "text": "/join family-code",
+            }
+        }
+        with patch.object(
+            settings_bot, "api", side_effect=[True, {"message_id": 8}]
+        ):
+            settings_bot.handle_update(join, secrets, self.config, self.db)
+        self.assertTrue(is_authorized(self.db, "99", "42"))
+        self.assertEqual(
+            effective_config(self.config, self.db, "99")["max_lot_rub"], 2000
+        )
+
+        change = {
+            "message": {
+                "chat": {"id": 99},
+                "message_id": 9,
+                "text": "/maxprice 9000",
+            }
+        }
+        with patch.object(settings_bot, "api", return_value={"message_id": 8}):
+            settings_bot.handle_update(change, secrets, self.config, self.db)
+        self.assertEqual(
+            effective_config(self.config, self.db, "99")["max_lot_rub"], 9000
+        )
+        self.assertEqual(
+            effective_config(self.config, self.db, "42")["max_lot_rub"], 3000
+        )
+
+    def test_wrong_join_code_does_not_authorize_guest(self):
+        update = {
+            "message": {
+                "chat": {"id": 99},
+                "message_id": 7,
+                "text": "/join wrong",
+            }
+        }
+        secrets = {
+            "chat_id": 42,
+            "bot_token": "token",
+            "access_code": "right",
+        }
+        with patch.object(settings_bot, "api") as telegram:
+            settings_bot.handle_update(update, secrets, self.config, self.db)
+        self.assertFalse(is_authorized(self.db, "99", "42"))
+        self.assertEqual(telegram.call_args.args[1], "sendMessage")
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ from bot import ROOT, telegram
 from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
-from runtime_settings import activate_settings, active_config, source_enabled, threshold_ton
+from runtime_settings import activate_settings, active_profiles, source_enabled, threshold_ton
 from special_traits import apply_special_bases
 
 TONNEL_URL = "https://gifts2.tonnel.network/api/pageGifts"
@@ -571,9 +571,25 @@ def attach_cross_market_floors(item, result, config, secrets, db):
     return add_portals_floor(item, result, config, secrets, db)
 
 
-def send_if_new_price(item, result, config, secrets, db, send):
+def send_if_new_price(item, result, config, secrets, db, send, *, chat_id=None):
     key = str(item["gift_id"])
-    old = db.execute("SELECT price FROM tonnel_alerts WHERE id=?", (key,)).fetchone()
+    recipient = str(
+        chat_id if chat_id is not None else secrets.get("chat_id", "__default__")
+    )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS tonnel_alerts_by_chat "
+        "(chat_id TEXT NOT NULL, id TEXT NOT NULL, price TEXT, sent REAL, "
+        "PRIMARY KEY (chat_id, id))"
+    )
+    old = db.execute(
+        "SELECT price FROM tonnel_alerts_by_chat WHERE chat_id=? AND id=?",
+        (recipient, key),
+    ).fetchone()
+    owner = recipient == str(secrets.get("chat_id", "__default__"))
+    if old is None and owner:
+        old = db.execute(
+            "SELECT price FROM tonnel_alerts WHERE id=?", (key,)
+        ).fetchone()
     if old and result["price"] >= decimal(old[0]):
         return False
     text = format_alert(item, result, config)
@@ -582,16 +598,23 @@ def send_if_new_price(item, result, config, secrets, db, send):
         return False
     nft_slug = slug(item)
     preview_url = f"https://t.me/nft/{nft_slug}" if nft_slug else None
+    chat_secrets = dict(secrets, chat_id=recipient)
     message_id = telegram(
-        secrets, text, preview_url=preview_url, button_url=listing_link(item)
+        chat_secrets, text, preview_url=preview_url, button_url=listing_link(item)
     )
     remember_alert(
-        db, "Tonnel", item, result, message_id, preview_url=preview_url
+        db, "Tonnel", item, result, message_id, preview_url=preview_url,
+        chat_id=recipient,
     )
     db.execute(
-        "INSERT OR REPLACE INTO tonnel_alerts VALUES (?, ?, ?)",
-        (key, str(result["price"]), time.time()),
+        "INSERT OR REPLACE INTO tonnel_alerts_by_chat VALUES (?, ?, ?, ?)",
+        (recipient, key, str(result["price"]), time.time()),
     )
+    if owner:
+        db.execute(
+            "INSERT OR REPLACE INTO tonnel_alerts VALUES (?, ?, ?)",
+            (key, str(result["price"]), time.time()),
+        )
     db.commit()
     return True
 
@@ -651,9 +674,11 @@ def collection_enabled(name, config):
 
 
 def process_event(event, config, secrets, db, send=True):
-    config = active_config(config)
-    if not source_enabled(config, "tonnel"):
-        return False
+    profiles = [
+        (chat_id, user_config)
+        for chat_id, user_config in active_profiles(config)
+        if source_enabled(user_config, "tonnel")
+    ]
     event_id = event.get("eventId") if isinstance(event, dict) else None
     if not isinstance(event_id, str) or not event_id:
         return False
@@ -682,26 +707,35 @@ def process_event(event, config, secrets, db, send=True):
     # Never hold a marketplace write lock while fetching floor books over the network.
     db.commit()
     item = event_item(event)
-    if item is not None and collection_enabled(item.get("name"), config):
+    if item is not None and profiles:
         rate = load_rate(db)
-        if decimal(item.get("price"), "цена") <= threshold_ton(
-            config, "max_lot", rate
-        ):
+        eligible_profiles = [
+            (chat_id, user_config)
+            for chat_id, user_config in profiles
+            if collection_enabled(item.get("name"), user_config)
+            and decimal(item.get("price"), "цена")
+            <= threshold_ton(user_config, "max_lot", rate)
+        ]
+        if eligible_profiles:
             floor_book = load_collection_book(db, item["name"], config)
             variant_books = load_variant_books(
                 db, item["name"], [item], rate, config,
                 [int(config.get("variant_query_budget_per_event", 1))],
             )
-            result = best_score(item, floor_book, variant_books, rate, config)
-            result = apply_special_bases(item, result, config, db)
-            result = apply_sales_evidence(item, result, db, config)
-            result = attach_cross_market_floors(item, result, config, secrets, db)
-            if result is not None:
-                db.execute(
-                    "CREATE TABLE IF NOT EXISTS tonnel_alerts "
-                    "(id TEXT PRIMARY KEY, price TEXT, sent REAL)"
+            for chat_id, user_config in eligible_profiles:
+                result = best_score(
+                    item, floor_book, variant_books, rate, user_config
                 )
-                delivered = send_if_new_price(item, result, config, secrets, db, send)
+                result = apply_special_bases(item, result, user_config, db)
+                result = apply_sales_evidence(item, result, db, user_config)
+                result = attach_cross_market_floors(
+                    item, result, user_config, secrets, db
+                )
+                if result is not None:
+                    delivered = send_if_new_price(
+                        item, result, user_config, secrets, db, send,
+                        chat_id=chat_id,
+                    ) or delivered
 
     now = time.time()
     db.execute("INSERT INTO tonnel_events VALUES (?, ?)", (event_id, now))
@@ -752,7 +786,10 @@ def stream_events(config, secrets, db, send=True, duration=14340):
     deadline = time.monotonic() + max(60, int(duration))
     delivered = 0
     while time.monotonic() < deadline:
-        if not source_enabled(active_config(config), "tonnel"):
+        if not any(
+            source_enabled(user_config, "tonnel")
+            for _, user_config in active_profiles(config)
+        ):
             time.sleep(min(3, max(0, deadline - time.monotonic())))
             continue
         try:
@@ -799,8 +836,12 @@ def load_rate(db, max_age=3600):
 
 
 def run_cycle(config, secrets, db, send=False):
-    config = active_config(config)
-    if not source_enabled(config, "tonnel"):
+    profiles = [
+        (chat_id, user_config)
+        for chat_id, user_config in active_profiles(config)
+        if source_enabled(user_config, "tonnel")
+    ]
+    if not profiles:
         return 0
     rate = load_rate(db)
     db.execute("CREATE TABLE IF NOT EXISTS tonnel_alerts (id TEXT PRIMARY KEY, price TEXT, sent REAL)")
@@ -820,18 +861,32 @@ def run_cycle(config, secrets, db, send=False):
             )
             total += len(newest)
             for item in newest:
-                try:
-                    result = best_score(item, floor_book, variant_books, rate, config)
-                    result = apply_special_bases(item, result, config, db)
-                    result = apply_sales_evidence(item, result, db, config)
-                    result = attach_cross_market_floors(item, result, config, secrets, db)
-                except (ValueError, KeyError, TypeError):
-                    continue
-                if result is None:
-                    continue
-                candidates += 1
-                if send_if_new_price(item, result, config, secrets, db, send):
-                    delivered += 1
+                for chat_id, user_config in profiles:
+                    try:
+                        if not collection_enabled(item.get("name"), user_config):
+                            continue
+                        result = best_score(
+                            item, floor_book, variant_books, rate, user_config
+                        )
+                        result = apply_special_bases(
+                            item, result, user_config, db
+                        )
+                        result = apply_sales_evidence(
+                            item, result, db, user_config
+                        )
+                        result = attach_cross_market_floors(
+                            item, result, user_config, secrets, db
+                        )
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                    if result is None:
+                        continue
+                    candidates += 1
+                    if send_if_new_price(
+                        item, result, user_config, secrets, db, send,
+                        chat_id=chat_id,
+                    ):
+                        delivered += 1
         except SourceRateLimited:
             raise
         except RuntimeError as exc:
@@ -861,7 +916,7 @@ def main():
     with sqlite3.connect(ROOT / "settings.sqlite3", timeout=5) as settings_db:
         settings_db.execute("PRAGMA busy_timeout=5000")
         settings_db.execute("PRAGMA journal_mode=WAL")
-        activate_settings(settings_db)
+        activate_settings(settings_db, secrets["chat_id"])
         with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
             db.execute("PRAGMA busy_timeout=30000")
             db.execute("PRAGMA journal_mode=WAL")

@@ -7,6 +7,8 @@ from pathlib import Path
 from runtime_settings import (
     activate_settings,
     active_config,
+    active_profiles,
+    authorize_chat,
     effective_config,
     feature_enabled,
     set_feature_enabled,
@@ -99,6 +101,37 @@ class RuntimeSettingsTests(unittest.TestCase):
                     set_setting(second, "min_floor_rub", 1500)
             with sqlite3.connect(path) as reopened:
                 self.assertEqual(effective_config(self.config, reopened)["min_floor_rub"], 1500)
+
+    def test_authorized_users_have_independent_settings(self):
+        activate_settings(self.db, "owner")
+        authorize_chat(self.db, "guest")
+        set_setting(self.db, "max_lot_rub", 3000, chat_id="owner")
+        set_setting(self.db, "max_lot_rub", 9000, chat_id="guest")
+        set_source_enabled(self.db, "portals", False, chat_id="guest")
+
+        profiles = dict(active_profiles(self.config))
+        self.assertEqual(profiles["owner"]["max_lot_rub"], 3000)
+        self.assertEqual(profiles["guest"]["max_lot_rub"], 9000)
+        self.assertTrue(source_enabled(profiles["owner"], "portals"))
+        self.assertFalse(source_enabled(profiles["guest"], "portals"))
+
+    def test_legacy_settings_are_migrated_only_to_owner(self):
+        self.db.execute(
+            "CREATE TABLE runtime_settings "
+            "(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated REAL NOT NULL)"
+        )
+        self.db.execute(
+            "INSERT INTO runtime_settings VALUES ('max_lot_rub', '3500', 1)"
+        )
+        self.db.commit()
+        activate_settings(self.db, "owner")
+        authorize_chat(self.db, "guest")
+        self.assertEqual(
+            effective_config(self.config, self.db, "owner")["max_lot_rub"], 3500
+        )
+        self.assertEqual(
+            effective_config(self.config, self.db, "guest")["max_lot_rub"], 2000
+        )
 
 
 if __name__ == "__main__":

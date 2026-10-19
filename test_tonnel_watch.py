@@ -281,6 +281,41 @@ class TonnelScoringTests(unittest.TestCase):
             saved = db.execute("SELECT price FROM tonnel_alerts WHERE id='1'").fetchone()
             self.assertEqual(saved[0], "2.4")
 
+    def test_same_offer_is_delivered_once_to_each_chat(self):
+        item = gift(1, 2.5)
+        result = {"price": Decimal("2.5")}
+        secrets = {"chat_id": "owner"}
+        with sqlite3.connect(":memory:") as db, \
+                patch.object(watch, "format_alert", return_value="offer"), \
+                patch.object(watch, "telegram", side_effect=[101, 202]) as send:
+            db.execute(
+                "CREATE TABLE tonnel_alerts "
+                "(id TEXT PRIMARY KEY, price TEXT, sent REAL)"
+            )
+            self.assertTrue(watch.send_if_new_price(
+                item, result, self.config, secrets, db, True, chat_id="owner"
+            ))
+            self.assertTrue(watch.send_if_new_price(
+                item, result, self.config, secrets, db, True, chat_id="guest"
+            ))
+            self.assertFalse(watch.send_if_new_price(
+                item, result, self.config, secrets, db, True, chat_id="owner"
+            ))
+            self.assertFalse(watch.send_if_new_price(
+                item, result, self.config, secrets, db, True, chat_id="guest"
+            ))
+
+            self.assertEqual(send.call_count, 2)
+            self.assertEqual(
+                [call.args[0]["chat_id"] for call in send.call_args_list],
+                ["owner", "guest"],
+            )
+            rows = db.execute(
+                "SELECT chat_id, price FROM tonnel_alerts_by_chat "
+                "ORDER BY chat_id"
+            ).fetchall()
+            self.assertEqual(rows, [("guest", "2.5"), ("owner", "2.5")])
+
     def test_budget_is_enforced(self):
         self.assertIsNone(watch.score(gift(1, 20.0), self.floor, Decimal("124.42"), self.config))
 

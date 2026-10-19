@@ -22,7 +22,7 @@ from market_data import (
     complete_market_floors,
     record_market_activity,
 )
-from runtime_settings import activate_settings, active_config, source_enabled, threshold_ton
+from runtime_settings import activate_settings, active_profiles, source_enabled, threshold_ton
 from special_traits import apply_special_bases
 from tonnel_watch import (
     SourceRateLimited,
@@ -514,13 +514,29 @@ def format_alert(item, result, config):
     return format_market_alert(item, result, market="Portals")
 
 
-def send_if_new_price(item, result, config, secrets, db, send=True):
+def send_if_new_price(item, result, config, secrets, db, send=True, *, chat_id=None):
+    recipient = str(
+        chat_id if chat_id is not None else secrets.get("chat_id", "__default__")
+    )
     db.execute(
-        "CREATE TABLE IF NOT EXISTS portals_alerts "
-        "(id TEXT PRIMARY KEY, price TEXT, sent REAL)"
+        "CREATE TABLE IF NOT EXISTS portals_alerts_by_chat "
+        "(chat_id TEXT NOT NULL, id TEXT NOT NULL, price TEXT, sent REAL, "
+        "PRIMARY KEY (chat_id, id))"
     )
     key = str(item["gift_id"])
-    old = db.execute("SELECT price FROM portals_alerts WHERE id=?", (key,)).fetchone()
+    old = db.execute(
+        "SELECT price FROM portals_alerts_by_chat WHERE chat_id=? AND id=?",
+        (recipient, key),
+    ).fetchone()
+    owner = recipient == str(secrets.get("chat_id", "__default__"))
+    if old is None and owner:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS portals_alerts "
+            "(id TEXT PRIMARY KEY, price TEXT, sent REAL)"
+        )
+        old = db.execute(
+            "SELECT price FROM portals_alerts WHERE id=?", (key,)
+        ).fetchone()
     if old and result["price"] >= decimal(old[0]):
         return False
     text = format_alert(item, result, config)
@@ -529,24 +545,37 @@ def send_if_new_price(item, result, config, secrets, db, send=True):
         return False
     gift_slug = slug(item)
     preview_url = f"https://t.me/nft/{gift_slug}" if gift_slug else None
+    chat_secrets = dict(secrets, chat_id=recipient)
     message_id = telegram(
-        secrets, text, preview_url=preview_url, button_url=listing_link(item)
+        chat_secrets, text, preview_url=preview_url, button_url=listing_link(item)
     )
     remember_alert(
-        db, "Portals", item, result, message_id, preview_url=preview_url
+        db, "Portals", item, result, message_id, preview_url=preview_url,
+        chat_id=recipient,
     )
     db.execute(
-        "INSERT OR REPLACE INTO portals_alerts VALUES (?, ?, ?)",
-        (key, str(result["price"]), time.time()),
+        "INSERT OR REPLACE INTO portals_alerts_by_chat VALUES (?, ?, ?, ?)",
+        (recipient, key, str(result["price"]), time.time()),
     )
+    if owner:
+        db.execute(
+            "INSERT OR REPLACE INTO portals_alerts VALUES (?, ?, ?)",
+            (key, str(result["price"]), time.time()),
+        )
     db.commit()
     return True
 
 
 def process_listing(item, config, secrets, db, session, token, send=True):
     rate = load_rate(db)
-    if item["price"] > threshold_ton(config, "max_lot", rate):
-        return False
+    profiles = [
+        (chat_id, user_config)
+        for chat_id, user_config in active_profiles(config)
+        if source_enabled(user_config, "portals")
+        and item["price"] <= threshold_ton(user_config, "max_lot", rate)
+    ]
+    if not profiles:
+        return 0
     collection_book = cached_book(
         db, session, token, collection=item["name"],
         collection_id=item.get("collection_id") or None, config=config
@@ -564,22 +593,29 @@ def process_listing(item, config, secrets, db, session, token, send=True):
             collection_id=item.get("collection_id") or None,
             backdrop=item["backdrop"], config=config
         )
-    score_config = portals_scoring_config(config)
-    result = best_score(item, collection_book, variant_books, rate, score_config)
-    result = apply_special_bases(item, result, score_config, db)
-    result = apply_sales_evidence(item, result, db, score_config)
-    if result is None:
-        return False
-    result = add_portals_floor(
-        item, result, config, secrets, db, base_market="Portals",
-        portals_session=session, portals_token=token,
-    )
-    return send_if_new_price(item, result, config, secrets, db, send)
+    delivered = 0
+    for chat_id, user_config in profiles:
+        score_config = portals_scoring_config(user_config)
+        result = best_score(item, collection_book, variant_books, rate, score_config)
+        result = apply_special_bases(item, result, score_config, db)
+        result = apply_sales_evidence(item, result, db, score_config)
+        if result is None:
+            continue
+        result = add_portals_floor(
+            item, result, user_config, secrets, db, base_market="Portals",
+            portals_session=session, portals_token=token,
+        )
+        delivered += int(send_if_new_price(
+            item, result, user_config, secrets, db, send, chat_id=chat_id
+        ))
+    return delivered
 
 
 def run_cycle(config, secrets, db, session, token="", send=True):
-    config = active_config(config)
-    if not source_enabled(config, "portals"):
+    if not any(
+        source_enabled(user_config, "portals")
+        for _, user_config in active_profiles(config)
+    ):
         return 0
     latest = fetch_listings(
         session, token, sort="listed_at desc", limit=int(config.get("portals_feed_limit", 20))
@@ -671,7 +707,7 @@ def main():
     with sqlite3.connect(ROOT / "settings.sqlite3", timeout=5) as settings_db:
         settings_db.execute("PRAGMA busy_timeout=5000")
         settings_db.execute("PRAGMA journal_mode=WAL")
-        activate_settings(settings_db)
+        activate_settings(settings_db, secrets["chat_id"])
         with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
             db.execute("PRAGMA busy_timeout=30000")
             db.execute("PRAGMA journal_mode=WAL")

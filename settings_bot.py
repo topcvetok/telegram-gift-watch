@@ -14,8 +14,12 @@ from runtime_settings import (
     NUMBER_SETTING_LABELS,
     SETTING_LABELS,
     SOURCE_LABELS,
+    activate_settings,
+    authorize_chat,
     effective_config,
     feature_enabled,
+    is_authorized,
+    revoke_chat,
     set_feature_enabled,
     set_number_setting,
     set_setting,
@@ -36,8 +40,8 @@ def api(secrets, method, payload=None):
     return result.get("result")
 
 
-def settings_text(config, db):
-    current = effective_config(config, db)
+def settings_text(config, db, chat_id=None):
+    current = effective_config(config, db, chat_id)
     sources = "\n".join(
         f"{'✅' if source_enabled(current, source) else '❌'} {label}"
         for source, label in SOURCE_LABELS.items()
@@ -77,8 +81,8 @@ def format_threshold(config, name):
     return f"{format_rubles(config[f'{name}_rub'])} ₽"
 
 
-def settings_keyboard(config, db):
-    current = effective_config(config, db)
+def settings_keyboard(config, db, chat_id=None):
+    current = effective_config(config, db, chat_id)
     source_rows = [[{
         "text": f"{'✅' if source_enabled(current, source) else '❌'} {label}",
         "callback_data": f"settings:toggle:{source}",
@@ -164,9 +168,9 @@ def show_settings(secrets, config, db, *, message_id=None):
         message_id = remembered_settings_message(db, secrets["chat_id"])
     payload = {
         "chat_id": secrets["chat_id"],
-        "text": settings_text(config, db),
+        "text": settings_text(config, db, secrets["chat_id"]),
         "parse_mode": "HTML",
-        "reply_markup": settings_keyboard(config, db),
+        "reply_markup": settings_keyboard(config, db, secrets["chat_id"]),
         "link_preview_options": {"is_disabled": True},
     }
     method = "sendMessage"
@@ -320,7 +324,7 @@ def parse_command(text):
     return command, parts[1:]
 
 
-def apply_command(text, config, db):
+def apply_command(text, config, db, chat_id=None):
     command, args = parse_command(text)
     if command in ("/settings", "/start", "/help"):
         return "settings"
@@ -334,11 +338,11 @@ def apply_command(text, config, db):
         example = "/maxprice 2500" if key == "max_lot_rub" else "/minfloor 1200"
         raise ValueError(f"Формат команды: {example}")
     value, currency = normalize_price_text(" ".join(args))
-    set_setting(db, key, value, currency=currency)
+    set_setting(db, key, value, currency=currency, chat_id=chat_id)
     return "settings"
 
 
-def apply_callback(data, config, db):
+def apply_callback(data, config, db, chat_id=None):
     if data == "settings:refresh":
         return "refresh", None
     if data == "settings:cancel":
@@ -346,14 +350,16 @@ def apply_callback(data, config, db):
     parts = str(data or "").split(":")
     if len(parts) == 3 and parts[:2] == ["settings", "toggle"]:
         source = parts[2]
-        current = effective_config(config, db)
-        enabled = set_source_enabled(db, source, not source_enabled(current, source))
+        current = effective_config(config, db, chat_id)
+        enabled = set_source_enabled(
+            db, source, not source_enabled(current, source), chat_id=chat_id
+        )
         return ("enabled" if enabled else "disabled"), source
     if len(parts) == 3 and parts[:2] == ["settings", "feature"]:
         feature = parts[2]
-        current = effective_config(config, db)
+        current = effective_config(config, db, chat_id)
         enabled = set_feature_enabled(
-            db, feature, not feature_enabled(current, feature)
+            db, feature, not feature_enabled(current, feature), chat_id=chat_id
         )
         return ("feature_enabled" if enabled else "feature_disabled"), feature
     if len(parts) == 3 and parts[:2] == ["settings", "number"]:
@@ -370,53 +376,73 @@ def apply_callback(data, config, db):
 
 
 def handle_update(update, secrets, config, db):
-    expected_chat = str(secrets["chat_id"])
+    owner_chat = str(secrets["chat_id"])
     message = update.get("message") if isinstance(update, dict) else None
     if isinstance(message, dict):
         chat = message.get("chat")
-        if not isinstance(chat, dict) or str(chat.get("id")) != expected_chat:
+        if not isinstance(chat, dict) or chat.get("id") is None:
             return
-        key, settings_message_id = pending_input_state(db, expected_chat)
+        chat_id = str(chat["id"])
+        chat_secrets = dict(secrets, chat_id=chat_id)
+        text = message.get("text")
+        command, args = parse_command(text)
+        if not is_authorized(db, chat_id, owner_chat):
+            if command == "/join" and args and secrets.get("access_code"):
+                if " ".join(args) == str(secrets["access_code"]):
+                    authorize_chat(db, chat_id)
+                    delete_message(chat_secrets, message.get("message_id"))
+                    show_settings(chat_secrets, config, db)
+                else:
+                    send_text(chat_secrets, "Неверный код доступа.")
+            return
+        if command == "/leave" and chat_id != owner_chat:
+            revoke_chat(db, chat_id)
+            delete_message(chat_secrets, message.get("message_id"))
+            send_text(chat_secrets, "Доступ отключён. Настройки сохранены для повторного входа.")
+            return
+        key, settings_message_id = pending_input_state(db, chat_id)
         try:
-            text = message.get("text")
-            command, _ = parse_command(text)
             if key is not None and not command.startswith("/"):
                 if key in SETTING_LABELS:
                     value, currency = normalize_price_text(text)
-                    set_setting(db, key, value, currency=currency)
+                    set_setting(
+                        db, key, value, currency=currency, chat_id=chat_id
+                    )
                 else:
-                    set_number_setting(db, key, normalize_integer_text(text))
-                clear_input(db, expected_chat)
-                delete_message(secrets, message.get("message_id"))
+                    set_number_setting(
+                        db, key, normalize_integer_text(text), chat_id=chat_id
+                    )
+                clear_input(db, chat_id)
+                delete_message(chat_secrets, message.get("message_id"))
                 show_settings(
-                    secrets, config, db, message_id=settings_message_id
+                    chat_secrets, config, db, message_id=settings_message_id
                 )
                 return
-            action = apply_command(text, config, db)
+            action = apply_command(text, config, db, chat_id)
             if action == "settings":
-                clear_input(db, expected_chat)
-                delete_message(secrets, message.get("message_id"))
+                clear_input(db, chat_id)
+                delete_message(chat_secrets, message.get("message_id"))
                 show_settings(
-                    secrets, config, db, message_id=settings_message_id
+                    chat_secrets, config, db, message_id=settings_message_id
                 )
             elif action == "cancel":
-                clear_input(db, expected_chat)
-                delete_message(secrets, message.get("message_id"))
+                clear_input(db, chat_id)
+                delete_message(chat_secrets, message.get("message_id"))
                 show_settings(
-                    secrets, config, db, message_id=settings_message_id
+                    chat_secrets, config, db, message_id=settings_message_id
                 )
         except ValueError as exc:
             if key is not None and settings_message_id is not None:
-                delete_message(secrets, message.get("message_id"))
+                delete_message(chat_secrets, message.get("message_id"))
                 send_input_prompt(
-                    secrets,
+                    chat_secrets,
                     key,
                     config,
                     message_id=settings_message_id,
                     error=str(exc),
                 )
             else:
-                send_text(secrets, f"{exc}\nПопробуй ещё раз или отправь /cancel.")
+                send_text(chat_secrets, f"{exc}\nПопробуй ещё раз или отправь /cancel.")
         return
 
     callback = update.get("callback_query") if isinstance(update, dict) else None
@@ -424,12 +450,16 @@ def handle_update(update, secrets, config, db):
         return
     callback_message = callback.get("message")
     chat = callback_message.get("chat") if isinstance(callback_message, dict) else None
-    if not isinstance(chat, dict) or str(chat.get("id")) != expected_chat:
+    if not isinstance(chat, dict) or chat.get("id") is None:
         return
+    chat_id = str(chat["id"])
+    if not is_authorized(db, chat_id, owner_chat):
+        return
+    chat_secrets = dict(secrets, chat_id=chat_id)
     callback_id = callback.get("id")
     settings_message_id = callback_message.get("message_id")
     try:
-        action, key = apply_callback(callback.get("data"), config, db)
+        action, key = apply_callback(callback.get("data"), config, db, chat_id)
         if callback_id:
             if action == "input":
                 answer = "Теперь введи значение"
@@ -441,24 +471,24 @@ def handle_update(update, secrets, config, db):
                 answer = f"{FEATURE_LABELS[key]} {'включён' if action == 'feature_enabled' else 'отключён'}"
             else:
                 answer = "Настройки обновлены"
-            api(secrets, "answerCallbackQuery", {
+            api(chat_secrets, "answerCallbackQuery", {
                 "callback_query_id": callback_id,
                 "text": answer,
             })
         if action == "input":
-            begin_input(db, expected_chat, key, settings_message_id)
+            begin_input(db, chat_id, key, settings_message_id)
             send_input_prompt(
-                secrets, key, config, message_id=settings_message_id
+                chat_secrets, key, config, message_id=settings_message_id
             )
         else:
             if action == "cancel":
-                clear_input(db, expected_chat)
+                clear_input(db, chat_id)
             show_settings(
-                secrets, config, db, message_id=settings_message_id
+                chat_secrets, config, db, message_id=settings_message_id
             )
     except ValueError as exc:
         if callback_id:
-            api(secrets, "answerCallbackQuery", {
+            api(chat_secrets, "answerCallbackQuery", {
                 "callback_query_id": callback_id,
                 "text": str(exc),
                 "show_alert": True,
@@ -471,6 +501,8 @@ def run(config, secrets, db, duration=3300):
         {"command": "maxprice", "description": "Максимальная цена в рублях"},
         {"command": "minfloor", "description": "Минимальный floor в рублях"},
         {"command": "cancel", "description": "Отменить ввод цены"},
+        {"command": "join", "description": "Войти по коду доступа"},
+        {"command": "leave", "description": "Отключить доступ"},
     ]})
     deadline = time.monotonic() + max(1, int(duration))
     offset = None
@@ -501,6 +533,7 @@ def main():
     with sqlite3.connect(ROOT / "settings.sqlite3", timeout=5) as db:
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA busy_timeout=5000")
+        activate_settings(db, secrets["chat_id"])
         run(config, secrets, db, args.duration)
 
 

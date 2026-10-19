@@ -33,26 +33,57 @@ NUMBER_SETTING_RANGES = {
 }
 
 _ACTIVE_SETTINGS_DB = None
+_ACTIVE_OWNER_CHAT_ID = None
+DEFAULT_PROFILE = "__default__"
 
 
-def activate_settings(db):
+def activate_settings(db, owner_chat_id=None):
     """Set the dedicated settings connection for this monitor process."""
-    global _ACTIVE_SETTINGS_DB
+    global _ACTIVE_SETTINGS_DB, _ACTIVE_OWNER_CHAT_ID
     _ACTIVE_SETTINGS_DB = db
+    _ACTIVE_OWNER_CHAT_ID = str(owner_chat_id) if owner_chat_id is not None else None
+    if db is not None:
+        ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
 
 
 def active_config(config):
     """Apply live settings when a production settings connection is active."""
     if _ACTIVE_SETTINGS_DB is None:
         return dict(config)
-    return effective_config(config, _ACTIVE_SETTINGS_DB)
+    return effective_config(config, _ACTIVE_SETTINGS_DB, _ACTIVE_OWNER_CHAT_ID)
 
 
-def ensure_settings_table(db):
+def active_profiles(config):
+    """Return (chat_id, config) pairs for every authorized recipient."""
+    if _ACTIVE_SETTINGS_DB is None or _ACTIVE_OWNER_CHAT_ID is None:
+        return [(None, dict(config))]
+    return [
+        (chat_id, effective_config(config, _ACTIVE_SETTINGS_DB, chat_id))
+        for chat_id in recipient_chat_ids(_ACTIVE_SETTINGS_DB, _ACTIVE_OWNER_CHAT_ID)
+    ]
+
+
+def ensure_settings_table(db, owner_chat_id=None):
     db.execute(
         "CREATE TABLE IF NOT EXISTS runtime_settings "
         "(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated REAL NOT NULL)"
     )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS runtime_settings_by_chat ("
+        "chat_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
+        "updated REAL NOT NULL, PRIMARY KEY (chat_id, key))"
+    )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS authorized_chats ("
+        "chat_id TEXT PRIMARY KEY, joined REAL NOT NULL, active INTEGER NOT NULL DEFAULT 1)"
+    )
+    if owner_chat_id is not None:
+        db.execute(
+            "INSERT OR IGNORE INTO runtime_settings_by_chat "
+            "(chat_id, key, value, updated) "
+            "SELECT ?, key, value, updated FROM runtime_settings",
+            (str(owner_chat_id),),
+        )
     # Release the initial schema write before any marketplace performs network I/O.
     db.commit()
 
@@ -70,9 +101,17 @@ def _rubles(value, label):
     return amount
 
 
-def effective_config(config, db):
+def _profile(chat_id=None):
+    if chat_id is not None:
+        return str(chat_id)
+    if _ACTIVE_OWNER_CHAT_ID is not None:
+        return _ACTIVE_OWNER_CHAT_ID
+    return DEFAULT_PROFILE
+
+
+def effective_config(config, db, chat_id=None):
     """Return a config copy with current Telegram-controlled thresholds."""
-    ensure_settings_table(db)
+    ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
     result = dict(config)
     keys = (
         tuple(SETTING_LABELS)
@@ -82,8 +121,9 @@ def effective_config(config, db):
         + tuple(NUMBER_SETTING_LABELS)
     )
     rows = db.execute(
-        f"SELECT key, value FROM runtime_settings WHERE key IN ({','.join('?' * len(keys))})",
-        keys,
+        f"SELECT key, value FROM runtime_settings_by_chat "
+        f"WHERE chat_id=? AND key IN ({','.join('?' * len(keys))})",
+        (_profile(chat_id), *keys),
     ).fetchall()
     stored = dict(rows)
     for key, label in SETTING_LABELS.items():
@@ -133,7 +173,7 @@ def _tons(value, label):
     return amount
 
 
-def set_setting(db, key, value, *, currency="rub"):
+def set_setting(db, key, value, *, currency="rub", chat_id=None):
     if key not in SETTING_LABELS:
         raise ValueError("Неизвестная настройка")
     if currency not in CURRENCIES:
@@ -145,59 +185,95 @@ def set_setting(db, key, value, *, currency="rub"):
     )
     if key == "max_lot_rub" and amount <= 0:
         raise ValueError("Максимальная стоимость должна быть больше нуля")
-    ensure_settings_table(db)
+    ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
+    profile = _profile(chat_id)
     db.execute(
-        "INSERT OR REPLACE INTO runtime_settings (key, value, updated) "
-        "VALUES (?, ?, unixepoch())",
-        (key, str(amount)),
+        "INSERT OR REPLACE INTO runtime_settings_by_chat "
+        "(chat_id, key, value, updated) VALUES (?, ?, ?, unixepoch())",
+        (profile, key, str(amount)),
     )
     db.execute(
-        "INSERT OR REPLACE INTO runtime_settings (key, value, updated) "
-        "VALUES (?, ?, unixepoch())",
-        (f"{key}:currency", currency),
+        "INSERT OR REPLACE INTO runtime_settings_by_chat "
+        "(chat_id, key, value, updated) VALUES (?, ?, ?, unixepoch())",
+        (profile, f"{key}:currency", currency),
     )
     db.commit()
     return amount
 
 
-def set_source_enabled(db, source, enabled):
+def set_source_enabled(db, source, enabled, *, chat_id=None):
     if source not in SOURCE_LABELS:
         raise ValueError("Неизвестная площадка")
-    ensure_settings_table(db)
+    ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
     db.execute(
-        "INSERT OR REPLACE INTO runtime_settings (key, value, updated) "
-        "VALUES (?, ?, unixepoch())",
-        (f"{source}_enabled", "1" if enabled else "0"),
+        "INSERT OR REPLACE INTO runtime_settings_by_chat "
+        "(chat_id, key, value, updated) VALUES (?, ?, ?, unixepoch())",
+        (_profile(chat_id), f"{source}_enabled", "1" if enabled else "0"),
     )
     db.commit()
     return bool(enabled)
 
 
-def set_feature_enabled(db, feature, enabled):
+def set_feature_enabled(db, feature, enabled, *, chat_id=None):
     if feature not in FEATURE_LABELS:
         raise ValueError("Неизвестное основание")
-    ensure_settings_table(db)
+    ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
     db.execute(
-        "INSERT OR REPLACE INTO runtime_settings (key, value, updated) "
-        "VALUES (?, ?, unixepoch())",
-        (f"{feature}_enabled", "1" if enabled else "0"),
+        "INSERT OR REPLACE INTO runtime_settings_by_chat "
+        "(chat_id, key, value, updated) VALUES (?, ?, ?, unixepoch())",
+        (_profile(chat_id), f"{feature}_enabled", "1" if enabled else "0"),
     )
     db.commit()
     return bool(enabled)
 
 
-def set_number_setting(db, key, value):
+def set_number_setting(db, key, value, *, chat_id=None):
     if key not in NUMBER_SETTING_LABELS:
         raise ValueError("Неизвестная настройка")
     amount = _integer_setting(key, value, NUMBER_SETTING_LABELS[key])
-    ensure_settings_table(db)
+    ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
     db.execute(
-        "INSERT OR REPLACE INTO runtime_settings (key, value, updated) "
-        "VALUES (?, ?, unixepoch())",
-        (key, str(amount)),
+        "INSERT OR REPLACE INTO runtime_settings_by_chat "
+        "(chat_id, key, value, updated) VALUES (?, ?, ?, unixepoch())",
+        (_profile(chat_id), key, str(amount)),
     )
     db.commit()
     return amount
+
+
+def authorize_chat(db, chat_id):
+    ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
+    db.execute(
+        "INSERT OR REPLACE INTO authorized_chats (chat_id, joined, active) "
+        "VALUES (?, unixepoch(), 1)",
+        (str(chat_id),),
+    )
+    db.commit()
+
+
+def revoke_chat(db, chat_id):
+    ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
+    db.execute("DELETE FROM authorized_chats WHERE chat_id=?", (str(chat_id),))
+    db.commit()
+
+
+def is_authorized(db, chat_id, owner_chat_id):
+    if str(chat_id) == str(owner_chat_id):
+        return True
+    ensure_settings_table(db, owner_chat_id)
+    return db.execute(
+        "SELECT 1 FROM authorized_chats WHERE chat_id=? AND active=1",
+        (str(chat_id),),
+    ).fetchone() is not None
+
+
+def recipient_chat_ids(db, owner_chat_id):
+    ensure_settings_table(db, owner_chat_id)
+    owner = str(owner_chat_id)
+    rows = db.execute(
+        "SELECT chat_id FROM authorized_chats WHERE active=1 ORDER BY joined"
+    ).fetchall()
+    return [owner] + [str(row[0]) for row in rows if str(row[0]) != owner]
 
 
 def source_enabled(config, source):

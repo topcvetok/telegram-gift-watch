@@ -17,7 +17,7 @@ from bot import ROOT, telegram
 from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
-from runtime_settings import activate_settings, active_config, source_enabled, threshold_ton
+from runtime_settings import activate_settings, active_profiles, source_enabled, threshold_ton
 from special_traits import apply_special_bases
 from tonnel_watch import apply_sales_evidence, best_score, decimal, load_rate, slug
 
@@ -281,13 +281,29 @@ def attach_cross_market_floors(
     )
 
 
-def send_if_new_price(item, result, config, secrets, db, send=True):
+def send_if_new_price(item, result, config, secrets, db, send=True, *, chat_id=None):
+    recipient = str(
+        chat_id if chat_id is not None else secrets.get("chat_id", "__default__")
+    )
     db.execute(
-        "CREATE TABLE IF NOT EXISTS mrkt_alerts "
-        "(id TEXT PRIMARY KEY, price TEXT, sent REAL)"
+        "CREATE TABLE IF NOT EXISTS mrkt_alerts_by_chat "
+        "(chat_id TEXT NOT NULL, id TEXT NOT NULL, price TEXT, sent REAL, "
+        "PRIMARY KEY (chat_id, id))"
     )
     key = str(item["gift_id"])
-    old = db.execute("SELECT price FROM mrkt_alerts WHERE id=?", (key,)).fetchone()
+    old = db.execute(
+        "SELECT price FROM mrkt_alerts_by_chat WHERE chat_id=? AND id=?",
+        (recipient, key),
+    ).fetchone()
+    owner = recipient == str(secrets.get("chat_id", "__default__"))
+    if old is None and owner:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS mrkt_alerts "
+            "(id TEXT PRIMARY KEY, price TEXT, sent REAL)"
+        )
+        old = db.execute(
+            "SELECT price FROM mrkt_alerts WHERE id=?", (key,)
+        ).fetchone()
     if old and result["price"] >= decimal(old[0]):
         return False
     text = format_alert(item, result, config)
@@ -296,16 +312,23 @@ def send_if_new_price(item, result, config, secrets, db, send=True):
         return False
     nft_slug = slug(item)
     preview_url = f"https://t.me/nft/{nft_slug}" if nft_slug else None
+    chat_secrets = dict(secrets, chat_id=recipient)
     message_id = telegram(
-        secrets, text, preview_url=preview_url, button_url=listing_link(item)
+        chat_secrets, text, preview_url=preview_url, button_url=listing_link(item)
     )
     remember_alert(
-        db, "MRKT", item, result, message_id, preview_url=preview_url
+        db, "MRKT", item, result, message_id, preview_url=preview_url,
+        chat_id=recipient,
     )
     db.execute(
-        "INSERT OR REPLACE INTO mrkt_alerts VALUES (?, ?, ?)",
-        (key, str(result["price"]), time.time()),
+        "INSERT OR REPLACE INTO mrkt_alerts_by_chat VALUES (?, ?, ?, ?)",
+        (recipient, key, str(result["price"]), time.time()),
     )
+    if owner:
+        db.execute(
+            "INSERT OR REPLACE INTO mrkt_alerts VALUES (?, ?, ?)",
+            (key, str(result["price"]), time.time()),
+        )
     db.commit()
     return True
 
@@ -350,7 +373,15 @@ def process_event(event, config, secrets, db, session, token, send=True):
         item = mrkt_item(event.get("gift"), event)
         if item is not None:
             rate = load_rate(db)
-            if item["price"] <= threshold_ton(config, "max_lot", rate):
+            profiles = [
+                (chat_id, user_config)
+                for chat_id, user_config in active_profiles(config)
+                if source_enabled(user_config, "mrkt")
+                and item["price"] <= threshold_ton(
+                    user_config, "max_lot", rate
+                )
+            ]
+            if profiles:
                 collection = item.get("name")
                 collection_book = cached_book(
                     db, session, token, collection=collection, config=config
@@ -366,15 +397,23 @@ def process_event(event, config, secrets, db, session, token, send=True):
                         db, session, token, collection=collection,
                         backdrop=item["backdrop"], config=config,
                     )
-                score_config = mrkt_scoring_config(config)
-                result = best_score(item, collection_book, variant_books, rate, score_config)
-                result = apply_special_bases(item, result, score_config, db)
-                result = apply_sales_evidence(item, result, db, score_config)
-                result = attach_cross_market_floors(
-                    item, result, config, secrets, db, session=session, token=token
-                )
-                if result is not None:
-                    delivered = send_if_new_price(item, result, config, secrets, db, send)
+                delivered = 0
+                for chat_id, user_config in profiles:
+                    score_config = mrkt_scoring_config(user_config)
+                    result = best_score(
+                        item, collection_book, variant_books, rate, score_config
+                    )
+                    result = apply_special_bases(item, result, score_config, db)
+                    result = apply_sales_evidence(item, result, db, score_config)
+                    result = attach_cross_market_floors(
+                        item, result, user_config, secrets, db,
+                        session=session, token=token,
+                    )
+                    if result is not None:
+                        delivered += int(send_if_new_price(
+                            item, result, user_config, secrets, db, send,
+                            chat_id=chat_id,
+                        ))
     now = time.time()
     db.execute("INSERT OR REPLACE INTO mrkt_events VALUES (?, ?)", (event_id, now))
     db.execute("DELETE FROM mrkt_events WHERE processed < ?", (now - 8 * 86400,))
@@ -391,8 +430,10 @@ def fetch_feed(session, token, count=20):
 
 
 def run_cycle(config, secrets, db, session, token, send=True):
-    config = active_config(config)
-    if not source_enabled(config, "mrkt"):
+    if not any(
+        source_enabled(user_config, "mrkt")
+        for _, user_config in active_profiles(config)
+    ):
         return 0
     events = fetch_feed(session, token, int(config.get("mrkt_feed_limit", 20)))
     delivered = 0
@@ -462,7 +503,7 @@ def main():
     with sqlite3.connect(ROOT / "settings.sqlite3", timeout=5) as settings_db:
         settings_db.execute("PRAGMA busy_timeout=5000")
         settings_db.execute("PRAGMA journal_mode=WAL")
-        activate_settings(settings_db)
+        activate_settings(settings_db, secrets["chat_id"])
         with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA busy_timeout=30000")
