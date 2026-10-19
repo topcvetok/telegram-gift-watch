@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <title>Gift Watch</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root{--bg:var(--tg-theme-bg-color,#0b0f16);--card:var(--tg-theme-secondary-bg-color,#151b26);--text:var(--tg-theme-text-color,#f4f7fb);--muted:var(--tg-theme-hint-color,#8d98aa);--accent:var(--tg-theme-button-color,#2f80ed);--accentText:var(--tg-theme-button-text-color,#fff);--line:rgba(145,160,180,.18);--good:#40c98b;--bad:#ff6577}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:680px;margin:auto;padding:18px 14px 110px}.hero{padding:10px 4px 18px}.hero h1{font-size:27px;margin:0 0 6px}.hero p{margin:0;color:var(--muted)}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px}.card h2{font-size:16px;margin:0 0 14px}.row{display:flex;align-items:center;gap:10px;margin:10px 0}.row label{flex:1}.sub{display:block;color:var(--muted);font-size:12px;margin-top:2px}.price{display:grid;grid-template-columns:1fr 90px;gap:8px;margin:10px 0}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.12);color:var(--text);padding:12px;font:inherit;outline:none}input:focus,select:focus,textarea:focus{border-color:var(--accent)}textarea{min-height:92px;resize:vertical}.switch{position:relative;width:46px;height:28px;flex:0 0 auto}.switch input{display:none}.slider{position:absolute;inset:0;border-radius:20px;background:#657080;transition:.18s}.slider:before{content:"";position:absolute;width:22px;height:22px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.18s}.switch input:checked+.slider{background:var(--accent)}.switch input:checked+.slider:before{transform:translateX(18px)}.tabs{display:flex;padding:3px;background:rgba(0,0,0,.13);border-radius:12px;margin-bottom:12px}.tab{flex:1;border:0;border-radius:9px;padding:9px;background:transparent;color:var(--muted);font-weight:650}.tab.active{background:var(--accent);color:var(--accentText)}.filter-panel{display:none}.filter-panel.active{display:block}.filter-grid{display:grid;gap:10px}.filter-grid label{font-size:13px;font-weight:650}.footer{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 30%)}.save{display:block;width:min(652px,100%);margin:auto;border:0;border-radius:14px;padding:14px;background:var(--accent);color:var(--accentText);font-weight:750;font-size:16px}.save:disabled{opacity:.45}.note{font-size:12px;color:var(--muted);margin:8px 2px 0}.pill{display:inline-block;border-radius:999px;padding:4px 8px;background:rgba(64,201,139,.13);color:var(--good);font-size:12px;font-weight:700}.error{color:var(--bad)}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <section class="hero">
+    <span class="pill">Gift Watch</span>
+    <h1>Настройки мониторинга</h1>
+    <p>Изменяются только поля, которые ты тронул в этом приложении.</p>
+  </section>
+
+  <section class="card">
+    <h2>Лимиты</h2>
+    <label class="sub">Максимальная стоимость</label>
+    <div class="price"><input id="max_lot" inputmode="decimal" placeholder="Оставить без изменений"><select id="max_lot_currency"><option value="ton">TON</option><option value="rub">₽</option></select></div>
+    <label class="sub">Минимальный floor</label>
+    <div class="price"><input id="min_floor" inputmode="decimal" placeholder="Оставить без изменений"><select id="min_floor_currency"><option value="ton">TON</option><option value="rub">₽</option></select></div>
+  </section>
+
+  <section class="card">
+    <h2>Площадки</h2>
+    <div class="row"><label>Tonnel</label><label class="switch"><input id="source_tonnel" type="checkbox" checked><span class="slider"></span></label></div>
+    <div class="row"><label>Portals</label><label class="switch"><input id="source_portals" type="checkbox" checked><span class="slider"></span></label></div>
+    <div class="row"><label>MRKT</label><label class="switch"><input id="source_mrkt" type="checkbox" checked><span class="slider"></span></label></div>
+  </section>
+
+  <section class="card">
+    <h2>Основания и уведомления</h2>
+    <div class="row"><label>Floor коллекции</label><label class="switch"><input id="feature_collection_basis" type="checkbox"><span class="slider"></span></label></div>
+    <div class="row"><label>Floor модели</label><label class="switch"><input id="feature_model_basis" type="checkbox" checked><span class="slider"></span></label></div>
+    <div class="row"><label>Разрешённый фон</label><label class="switch"><input id="feature_backdrop_basis" type="checkbox" checked><span class="slider"></span></label></div>
+    <div class="row"><label>Красивый номер</label><label class="switch"><input id="feature_beautiful_number" type="checkbox" checked><span class="slider"></span></label></div>
+    <div class="row"><label>Монохром</label><label class="switch"><input id="feature_monochrome" type="checkbox" checked><span class="slider"></span></label></div>
+    <div class="row"><label>Улучшения Black / Onyx</label><label class="switch"><input id="feature_dark_upgrades" type="checkbox" checked><span class="slider"></span></label></div>
+    <div class="row"><label>Ежедневный отчёт<span class="sub">По московскому времени</span></label><label class="switch"><input id="feature_daily_report" type="checkbox" checked><span class="slider"></span></label></div>
+    <label class="sub" for="daily_report_hour">Час отчёта</label>
+    <input id="daily_report_hour" type="number" min="0" max="23" value="21">
+  </section>
+
+  <section class="card">
+    <h2>Белые и чёрные списки</h2>
+    <div class="tabs"><button class="tab active" data-mode="allow">Белый список</button><button class="tab" data-mode="deny">Чёрный список</button></div>
+    <p class="note">Белый список пропускает только указанные значения. Чёрный исключает совпадения. Одно название на строку, регистр не важен.</p>
+    <div class="filter-panel active" data-panel="allow"><div class="filter-grid">
+      <label>Коллекции<textarea id="collections_allow" placeholder="Plush Pepe&#10;Durov's Cap"></textarea></label>
+      <label>Модели<textarea id="models_allow" placeholder="Pumpkin"></textarea></label>
+      <label>Фоны<textarea id="backdrops_allow" placeholder="Black&#10;Onyx Black"></textarea></label>
+    </div></div>
+    <div class="filter-panel" data-panel="deny"><div class="filter-grid">
+      <label>Коллекции<textarea id="collections_deny"></textarea></label>
+      <label>Модели<textarea id="models_deny"></textarea></label>
+      <label>Фоны<textarea id="backdrops_deny"></textarea></label>
+    </div></div>
+  </section>
+  <p id="status" class="note"></p>
+</main>
+<div class="footer"><button id="save" class="save" disabled>Сохранить изменения</button></div>
+
+<script>
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) { tg.ready(); tg.expand(); }
+  const dirty = new Set();
+  const stateIds = [
+    'source_tonnel','source_portals','source_mrkt','feature_collection_basis',
+    'feature_model_basis','feature_backdrop_basis','feature_beautiful_number',
+    'feature_monochrome','feature_dark_upgrades','feature_daily_report',
+    'daily_report_hour','max_lot_currency','min_floor_currency',
+    'collections_allow','collections_deny','models_allow','models_deny',
+    'backdrops_allow','backdrops_deny'
+  ];
+  const save = document.getElementById('save');
+  function mark(group){ dirty.add(group); save.disabled=false; }
+  document.querySelectorAll('input,select,textarea').forEach(el => {
+    el.addEventListener('change', () => mark(el.id.includes('_allow')||el.id.includes('_deny') ? 'filters' : el.id));
+    if (el.tagName==='TEXTAREA' || el.id==='max_lot' || el.id==='min_floor') el.addEventListener('input', () => mark(el.id.includes('_allow')||el.id.includes('_deny') ? 'filters' : el.id));
+  });
+  document.querySelectorAll('.tab').forEach(button => button.onclick=()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===button));
+    document.querySelectorAll('.filter-panel').forEach(x=>x.classList.toggle('active',x.dataset.panel===button.dataset.mode));
+  });
+  function lines(id){return [...new Set(document.getElementById(id).value.split('\n').map(x=>x.trim()).filter(Boolean))];}
+  function snapshot(){const out={};stateIds.forEach(id=>{const e=document.getElementById(id);out[id]=e.type==='checkbox'?e.checked:e.value});return out;}
+  function restore(raw){try{const data=JSON.parse(raw||'{}');stateIds.forEach(id=>{if(!(id in data))return;const e=document.getElementById(id);if(e.type==='checkbox')e.checked=!!data[id];else e.value=data[id]});}catch(_){}}
+  if(tg && tg.CloudStorage) tg.CloudStorage.getItem('giftwatch_form_v1',(err,value)=>{if(!err&&value)restore(value)});
+  save.onclick=()=>{
+    const settings={prices:{},sources:{},features:{},numbers:{}};
+    for(const name of ['max_lot','min_floor']) if(dirty.has(name)||dirty.has(name+'_currency')){
+      const value=document.getElementById(name).value.trim();
+      if(value)settings.prices[name]={value,currency:document.getElementById(name+'_currency').value};
+    }
+    for(const name of ['tonnel','portals','mrkt']) if(dirty.has('source_'+name))settings.sources[name]=document.getElementById('source_'+name).checked;
+    for(const name of ['collection_basis','model_basis','backdrop_basis','beautiful_number','monochrome','dark_upgrades','daily_report']) if(dirty.has('feature_'+name))settings.features[name]=document.getElementById('feature_'+name).checked;
+    if(dirty.has('daily_report_hour'))settings.numbers.daily_report_hour=Number(document.getElementById('daily_report_hour').value);
+    if(dirty.has('filters'))settings.filters={};
+    if(dirty.has('filters'))for(const scope of ['collections','models','backdrops'])settings.filters[scope]={allow:lines(scope+'_allow'),deny:lines(scope+'_deny')};
+    const payload=JSON.stringify({type:'save_settings',settings});
+    const status=document.getElementById('status');
+    if(new TextEncoder().encode(payload).length>4000){status.textContent='Списки слишком длинные для одного сохранения.';status.className='note error';return;}
+    if(tg && tg.CloudStorage)tg.CloudStorage.setItem('giftwatch_form_v1',JSON.stringify(snapshot()),()=>{});
+    if(!tg || !tg.sendData){status.textContent='Открой приложение через кнопку в Telegram.';status.className='note error';return;}
+    tg.sendData(payload);
+    tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success');
+    tg.close();
+  };
+</script>
+</body>
+</html>

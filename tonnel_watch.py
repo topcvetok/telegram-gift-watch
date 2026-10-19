@@ -19,7 +19,9 @@ from bot import ROOT, telegram
 from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
-from runtime_settings import activate_settings, active_profiles, source_enabled, threshold_ton
+from runtime_settings import (
+    activate_settings, active_profiles, item_allowed, source_enabled, threshold_ton,
+)
 from special_traits import apply_special_bases
 
 TONNEL_URL = "https://gifts2.tonnel.network/api/pageGifts"
@@ -560,7 +562,7 @@ def listing_link(item):
 
 
 def format_alert(item, result, config):
-    return format_market_alert(item, result, market="Tonnel")
+    return format_market_alert(item, result, market="Tonnel", config=config)
 
 
 def attach_cross_market_floors(item, result, config, secrets, db):
@@ -713,6 +715,7 @@ def process_event(event, config, secrets, db, send=True):
             (chat_id, user_config)
             for chat_id, user_config in profiles
             if collection_enabled(item.get("name"), user_config)
+            and item_allowed(item, user_config)
             and decimal(item.get("price"), "цена")
             <= threshold_ton(user_config, "max_lot", rate)
         ]
@@ -864,6 +867,8 @@ def run_cycle(config, secrets, db, send=False):
                 for chat_id, user_config in profiles:
                     try:
                         if not collection_enabled(item.get("name"), user_config):
+                            continue
+                        if not item_allowed(item, user_config):
                             continue
                         result = best_score(
                             item, floor_book, variant_books, rate, user_config

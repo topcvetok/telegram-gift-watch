@@ -1,13 +1,40 @@
 """Shared Telegram alert rendering for marketplace monitors."""
 
 from html import escape
+from decimal import Decimal
 
 
 def _ton(value):
     return f"{value:.3f} TON"
 
 
-def format_market_alert(item, result, *, market):
+def best_resale_market(result, config=None):
+    """Pick the highest exact-model floor after configured marketplace costs."""
+    config = config or {}
+    candidates = []
+    for entry in result.get("market_floors") or []:
+        market = str(entry.get("market") or "")
+        floor = entry.get("model_floor")
+        if not market or floor is None or not entry.get("model_verified", True):
+            continue
+        if not config.get(f"{market.casefold()}_enabled", True):
+            continue
+        cost = Decimal(str(config.get(
+            f"{market.casefold()}_round_trip_cost_fraction", 0
+        ) or 0))
+        cost = min(max(cost, Decimal("0")), Decimal("0.99"))
+        net = floor * (Decimal("1") - cost)
+        candidates.append({
+            "market": market,
+            "floor": floor,
+            "cost_fraction": cost,
+            "net": net,
+            "margin": net - result["price"],
+        })
+    return max(candidates, key=lambda row: row["net"]) if candidates else None
+
+
+def format_market_alert(item, result, *, market, config=None):
     """Render the compact evidence-first alert requested by the user."""
     price = result["price"]
     rate = result["rate"]
@@ -61,6 +88,17 @@ def format_market_alert(item, result, *, market):
             f"при быстрой продаже за {_ton(result['resale'])}"
         )
 
+    resale = best_resale_market(result, config)
+    resale_lines = []
+    if resale is not None:
+        resale_lines = [
+            "",
+            "<b>Где выгоднее перепродать:</b>",
+            f"{escape(resale['market'])} — floor модели {_ton(resale['floor'])}",
+            f"После расходов: ≈ {_ton(resale['net'])}; "
+            f"запас к покупке: {resale['margin']:+.3f} TON",
+        ]
+
     lines = [
         f"<b>оффер на {escape(market)}</b>",
         "",
@@ -77,5 +115,6 @@ def format_market_alert(item, result, *, market):
         activity_line,
         "",
         scenario_line,
+        *resale_lines,
     ]
     return "\n".join(lines)

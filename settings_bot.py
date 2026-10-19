@@ -20,6 +20,7 @@ from runtime_settings import (
     feature_enabled,
     is_authorized,
     revoke_chat,
+    replace_filters,
     set_feature_enabled,
     set_number_setting,
     set_setting,
@@ -60,13 +61,21 @@ def settings_text(config, db, chat_id=None):
         f"{'✅' if feature_enabled(current, 'dark_upgrades') else '❌'} "
         "Новые улучшения с Black / Onyx Black"
     )
+    filters = current.get("filter_lists") or {}
+    allow_count = sum(len((filters.get(scope) or {}).get("allow", [])) for scope in filters)
+    deny_count = sum(len((filters.get(scope) or {}).get("deny", [])) for scope in filters)
+    report = (
+        f"{'✅' if feature_enabled(current, 'daily_report') else '❌'} "
+        f"Ежедневный отчёт в {int(current.get('daily_report_hour', 21)):02d}:00 МСК"
+    )
     return (
         "<b>Настройки Gift Watch</b>\n\n"
         f"💰 Максимальная стоимость: <b>{format_threshold(current, 'max_lot')}</b>\n"
         f"📊 Минимальный floor: <b>{format_threshold(current, 'min_floor')}</b>\n\n"
         f"<b>Основания:</b>\n{reasons}\n\n"
-        f"<b>Другие уведомления:</b>\n{upgrades}\n\n"
+        f"<b>Другие уведомления:</b>\n{upgrades}\n{report}\n\n"
         f"<b>Площадки:</b>\n{sources}\n\n"
+        f"<b>Фильтры:</b> белый список — {allow_count}, чёрный — {deny_count}\n\n"
         "Нажми кнопку и отправь новое значение. "
         "Цены и переключатели применяются сразу."
     )
@@ -132,8 +141,19 @@ def settings_keyboard(config, db, chat_id=None):
             ),
             "callback_data": "settings:feature:dark_upgrades",
         }],
+        [{
+            "text": (
+                f"{'✅' if feature_enabled(current, 'daily_report') else '❌'} "
+                "Ежедневный отчёт"
+            ),
+            "callback_data": "settings:feature:daily_report",
+        }],
+        [{
+            "text": f"🕘 Отчёт в {int(current.get('daily_report_hour', 21)):02d}:00 МСК",
+            "callback_data": "settings:number:daily_report_hour",
+        }],
     ]
-    return {"inline_keyboard": [
+    rows = [
         [{
             "text": "💰 Ввести максимальную стоимость",
             "callback_data": "settings:input:max_lot_rub",
@@ -145,7 +165,13 @@ def settings_keyboard(config, db, chat_id=None):
         *feature_rows,
         *source_rows,
         [{"text": "🔄 Обновить настройки", "callback_data": "settings:refresh"}],
-    ]}
+    ]
+    if str(config.get("mini_app_url") or "").strip():
+        rows.insert(0, [{
+            "text": "⚙️ Открыть Mini App",
+            "callback_data": "settings:app",
+        }])
+    return {"inline_keyboard": rows}
 
 
 def ensure_view_table(db):
@@ -216,6 +242,25 @@ def send_text(secrets, text):
     })
 
 
+def send_app_launcher(secrets, config):
+    app_url = str(config.get("mini_app_url") or "").strip()
+    if not app_url:
+        raise ValueError("Mini App пока не настроен")
+    return api(secrets, "sendMessage", {
+        "chat_id": secrets["chat_id"],
+        "text": "Открой Mini App кнопкой ниже. После сохранения изменения сразу попадут в бот.",
+        "reply_markup": {
+            "keyboard": [[{
+                "text": "⚙️ Открыть Gift Watch",
+                "web_app": {"url": app_url},
+            }]],
+            "resize_keyboard": True,
+            "one_time_keyboard": True,
+        },
+        "link_preview_options": {"is_disabled": True},
+    })
+
+
 def send_input_prompt(secrets, key, config, *, message_id=None, error=None):
     if key == "max_lot_rub":
         text = (
@@ -228,6 +273,8 @@ def send_input_prompt(secrets, key, config, *, message_id=None, error=None):
         text = "Сколько разных цифр максимум может быть в красивом номере? Введи число от <b>1</b> до <b>10</b>."
     elif key == "monochrome_max_floor_premium_percent":
         text = "На сколько процентов цена монохрома может быть выше floor модели? Введи число от <b>0</b> до <b>100</b>. Сейчас рекомендуется <b>15</b>."
+    elif key == "daily_report_hour":
+        text = "Введи час ежедневного отчёта по Москве: целое число от <b>0</b> до <b>23</b>."
     else:
         text = "Введи минимальное совпадение модели и фона от <b>0</b> до <b>100</b> процентов. Для сильного монохрома рекомендуется <b>80</b>."
     if error:
@@ -338,6 +385,8 @@ def parse_command(text):
 
 def apply_command(text, config, db, chat_id=None):
     command, args = parse_command(text)
+    if command == "/app":
+        return "app"
     if command in ("/settings", "/start", "/help"):
         return "settings"
     if command == "/cancel":
@@ -355,6 +404,8 @@ def apply_command(text, config, db, chat_id=None):
 
 
 def apply_callback(data, config, db, chat_id=None):
+    if data == "settings:app":
+        return "app", None
     if data == "settings:refresh":
         return "refresh", None
     if data == "settings:cancel":
@@ -387,6 +438,39 @@ def apply_callback(data, config, db, chat_id=None):
     return "input", key
 
 
+def apply_web_app_payload(data, db, chat_id=None):
+    try:
+        payload = json.loads(str(data or ""))
+    except json.JSONDecodeError:
+        raise ValueError("Mini App передал повреждённые настройки") from None
+    if not isinstance(payload, dict) or payload.get("type") != "save_settings":
+        raise ValueError("Неизвестная команда Mini App")
+    settings = payload.get("settings")
+    if not isinstance(settings, dict):
+        raise ValueError("Mini App не передал настройки")
+    prices = settings.get("prices") or {}
+    for name, key in (("max_lot", "max_lot_rub"), ("min_floor", "min_floor_rub")):
+        entry = prices.get(name)
+        if isinstance(entry, dict):
+            set_setting(
+                db, key, entry.get("value"),
+                currency=str(entry.get("currency") or "rub").casefold(),
+                chat_id=chat_id,
+            )
+    for source, enabled in (settings.get("sources") or {}).items():
+        if source in SOURCE_LABELS and isinstance(enabled, bool):
+            set_source_enabled(db, source, enabled, chat_id=chat_id)
+    for feature, enabled in (settings.get("features") or {}).items():
+        if feature in FEATURE_LABELS and isinstance(enabled, bool):
+            set_feature_enabled(db, feature, enabled, chat_id=chat_id)
+    for key, value in (settings.get("numbers") or {}).items():
+        if key in NUMBER_SETTING_LABELS:
+            set_number_setting(db, key, value, chat_id=chat_id)
+    if "filters" in settings:
+        replace_filters(db, settings.get("filters") or {}, chat_id=chat_id)
+    return True
+
+
 def handle_update(update, secrets, config, db):
     owner_chat = str(secrets["chat_id"])
     message = update.get("message") if isinstance(update, dict) else None
@@ -411,6 +495,14 @@ def handle_update(update, secrets, config, db):
             revoke_chat(db, chat_id)
             delete_message(chat_secrets, message.get("message_id"))
             send_text(chat_secrets, "Доступ отключён. Настройки сохранены для повторного входа.")
+            return
+        web_app_data = message.get("web_app_data")
+        if isinstance(web_app_data, dict):
+            try:
+                apply_web_app_payload(web_app_data.get("data"), db, chat_id)
+                show_settings(chat_secrets, config, db)
+            except ValueError as exc:
+                send_text(chat_secrets, f"Не удалось сохранить настройки: {exc}")
             return
         key, settings_message_id = pending_input_state(db, chat_id)
         try:
@@ -437,6 +529,10 @@ def handle_update(update, secrets, config, db):
                 show_settings(
                     chat_secrets, config, db, message_id=settings_message_id
                 )
+            elif action == "app":
+                clear_input(db, chat_id)
+                delete_message(chat_secrets, message.get("message_id"))
+                send_app_launcher(chat_secrets, config)
             elif action == "cancel":
                 clear_input(db, chat_id)
                 delete_message(chat_secrets, message.get("message_id"))
@@ -475,6 +571,8 @@ def handle_update(update, secrets, config, db):
         if callback_id:
             if action == "input":
                 answer = "Теперь введи значение"
+            elif action == "app":
+                answer = "Кнопка Mini App отправлена"
             elif action == "cancel":
                 answer = "Ввод отменён"
             elif action in ("enabled", "disabled"):
@@ -487,7 +585,9 @@ def handle_update(update, secrets, config, db):
                 "callback_query_id": callback_id,
                 "text": answer,
             })
-        if action == "input":
+        if action == "app":
+            send_app_launcher(chat_secrets, config)
+        elif action == "input":
             begin_input(db, chat_id, key, settings_message_id)
             send_input_prompt(
                 chat_secrets, key, config, message_id=settings_message_id
@@ -510,12 +610,16 @@ def handle_update(update, secrets, config, db):
 def run(config, secrets, db, duration=3300):
     api(secrets, "setMyCommands", {"commands": [
         {"command": "settings", "description": "Цена покупки и минимальный floor"},
+        {"command": "app", "description": "Открыть настройки Mini App"},
         {"command": "maxprice", "description": "Максимальная цена в рублях"},
         {"command": "minfloor", "description": "Минимальный floor в рублях"},
         {"command": "cancel", "description": "Отменить ввод цены"},
         {"command": "join", "description": "Войти по коду доступа"},
         {"command": "leave", "description": "Отключить доступ"},
     ]})
+    # Data-saving Mini Apps must be opened from a reply-keyboard Web App button.
+    # Keep the permanent menu on commands; /app sends the compatible launcher.
+    api(secrets, "setChatMenuButton", {"menu_button": {"type": "commands"}})
     deadline = time.monotonic() + max(1, int(duration))
     offset = None
     while time.monotonic() < deadline:

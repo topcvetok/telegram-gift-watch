@@ -22,7 +22,9 @@ from market_data import (
     complete_market_floors,
     record_market_activity,
 )
-from runtime_settings import activate_settings, active_profiles, source_enabled, threshold_ton
+from runtime_settings import (
+    activate_settings, active_profiles, item_allowed, source_enabled, threshold_ton,
+)
 from special_traits import apply_special_bases
 from tonnel_watch import (
     SourceRateLimited,
@@ -511,7 +513,7 @@ def listing_link(item):
 
 
 def format_alert(item, result, config):
-    return format_market_alert(item, result, market="Portals")
+    return format_market_alert(item, result, market="Portals", config=config)
 
 
 def send_if_new_price(item, result, config, secrets, db, send=True, *, chat_id=None):
@@ -572,6 +574,7 @@ def process_listing(item, config, secrets, db, session, token, send=True):
         (chat_id, user_config)
         for chat_id, user_config in active_profiles(config)
         if source_enabled(user_config, "portals")
+        and item_allowed(item, user_config)
         and item["price"] <= threshold_ton(user_config, "max_lot", rate)
     ]
     if not profiles:

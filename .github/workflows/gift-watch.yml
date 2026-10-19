@@ -93,18 +93,20 @@ jobs:
           tonnel_pid=$!
           python -u upgrade_watch.py --send --duration "${STREAM_SECONDS}" &
           upgrades_pid=$!
+          python -u daily_report.py --send --duration "${STREAM_SECONDS}" &
+          report_pid=$!
           if [ -n "${MRKT_TOKEN}" ]; then
             python -u mrkt_watch.py --send --duration "${STREAM_SECONDS}" &
             mrkt_pid=$!
           fi
           status=0
-          wait -n "${settings_pid}" "${portals_pid}" "${tonnel_pid}" "${upgrades_pid}" || status=$?
+          wait -n "${settings_pid}" "${portals_pid}" "${tonnel_pid}" "${upgrades_pid}" "${report_pid}" || status=$?
           if [ -n "${mrkt_pid}" ]; then
             kill "${mrkt_pid}" 2>/dev/null || true
             wait "${mrkt_pid}" 2>/dev/null || true
           fi
-          kill "${settings_pid}" "${portals_pid}" "${tonnel_pid}" "${upgrades_pid}" 2>/dev/null || true
-          wait "${settings_pid}" "${portals_pid}" "${tonnel_pid}" "${upgrades_pid}" 2>/dev/null || true
+          kill "${settings_pid}" "${portals_pid}" "${tonnel_pid}" "${upgrades_pid}" "${report_pid}" 2>/dev/null || true
+          wait "${settings_pid}" "${portals_pid}" "${tonnel_pid}" "${upgrades_pid}" "${report_pid}" 2>/dev/null || true
           exit "${status}"
 
       - name: Checkpoint SQLite databases

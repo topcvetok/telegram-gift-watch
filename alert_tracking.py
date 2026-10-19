@@ -29,6 +29,14 @@ def ensure_table(db):
         "sold_at REAL, preview_url TEXT, "
         "PRIMARY KEY (market, gift_id, chat_id))"
     )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS signal_log ("
+        "chat_id TEXT NOT NULL, market TEXT NOT NULL, gift_id TEXT NOT NULL, "
+        "gift_name TEXT, model TEXT, backdrop TEXT, price TEXT NOT NULL, "
+        "basis TEXT, model_floor TEXT, profit_rub REAL, sent REAL NOT NULL, "
+        "sold INTEGER NOT NULL DEFAULT 0, sold_at REAL, "
+        "PRIMARY KEY (chat_id, market, gift_id))"
+    )
     db.commit()
 
 
@@ -58,6 +66,21 @@ def remember_alert(
             time.time(), _preview_url(
                 item.get("name"), item.get("gift_num"), preview_url
             ),
+        ),
+    )
+    recipient = str(chat_id or "__default__")
+    db.execute(
+        "INSERT OR REPLACE INTO signal_log "
+        "(chat_id, market, gift_id, gift_name, model, backdrop, price, basis, "
+        "model_floor, profit_rub, sent, sold, sold_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)",
+        (
+            recipient, str(market), str(item["gift_id"]), item.get("name"),
+            item.get("model"), item.get("backdrop"), str(result["price"]),
+            result.get("basis"),
+            str(result["next_floor"]) if result.get("next_floor") is not None else None,
+            float(result["profit_rub"]) if result.get("profit_rub") is not None else None,
+            time.time(),
         ),
     )
     db.commit()
@@ -165,6 +188,10 @@ def mark_offer_sold(db, market, gift_id, secrets, *, sale_price=None, send=True)
     )
     db.execute(
         "UPDATE offer_messages SET sold=1, sold_at=? WHERE market=? AND gift_id=?",
+        (time.time(), str(market), str(gift_id)),
+    )
+    db.execute(
+        "UPDATE signal_log SET sold=1, sold_at=? WHERE market=? AND gift_id=?",
         (time.time(), str(market), str(gift_id)),
     )
     db.commit()

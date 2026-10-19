@@ -11,6 +11,8 @@ from runtime_settings import (
     authorize_chat,
     effective_config,
     feature_enabled,
+    item_allowed,
+    replace_filters,
     set_feature_enabled,
     set_number_setting,
     set_setting,
@@ -115,6 +117,28 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(profiles["guest"]["max_lot_rub"], 9000)
         self.assertTrue(source_enabled(profiles["owner"], "portals"))
         self.assertFalse(source_enabled(profiles["guest"], "portals"))
+
+    def test_white_and_black_lists_are_case_insensitive_and_per_user(self):
+        activate_settings(self.db, "owner")
+        authorize_chat(self.db, "guest")
+        replace_filters(self.db, {
+            "collections": {"allow": ["Plush Pepe"], "deny": []},
+            "models": {"allow": [], "deny": ["Pumpkin"]},
+            "backdrops": {"allow": [], "deny": []},
+        }, chat_id="guest")
+        profiles = dict(active_profiles(self.config))
+        self.assertTrue(item_allowed({
+            "name": "plush pepe", "model": "Frog", "backdrop": "Black",
+        }, profiles["guest"]))
+        self.assertFalse(item_allowed({
+            "name": "Plush Pepe", "model": "PUMPKIN", "backdrop": "Black",
+        }, profiles["guest"]))
+        self.assertFalse(item_allowed({
+            "name": "Durov's Cap", "model": "Frog", "backdrop": "Black",
+        }, profiles["guest"]))
+        self.assertTrue(item_allowed({
+            "name": "Durov's Cap", "model": "Pumpkin", "backdrop": "Black",
+        }, profiles["owner"]))
 
     def test_legacy_settings_are_migrated_only_to_owner(self):
         self.db.execute(

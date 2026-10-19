@@ -21,17 +21,27 @@ FEATURE_LABELS = {
     "beautiful_number": "Красивый номер",
     "monochrome": "Монохром",
     "dark_upgrades": "Улучшения Black / Onyx Black",
+    "daily_report": "Ежедневный отчёт",
 }
 NUMBER_SETTING_LABELS = {
     "beautiful_number_max_distinct_digits": "максимум разных цифр в номере",
     "monochrome_min_score": "минимальное совпадение монохрома",
     "monochrome_max_floor_premium_percent": "допустимое превышение floor для монохрома",
+    "daily_report_hour": "час ежедневного отчёта",
 }
 NUMBER_SETTING_RANGES = {
     "beautiful_number_max_distinct_digits": (1, 10),
     "monochrome_min_score": (0, 100),
     "monochrome_max_floor_premium_percent": (0, 100),
+    "daily_report_hour": (0, 23),
 }
+
+FILTER_SCOPES = {
+    "collections": "name",
+    "models": "model",
+    "backdrops": "backdrop",
+}
+FILTER_MODES = {"allow", "deny"}
 
 _ACTIVE_SETTINGS_DB = None
 _ACTIVE_OWNER_CHAT_ID = None
@@ -77,6 +87,12 @@ def ensure_settings_table(db, owner_chat_id=None):
     db.execute(
         "CREATE TABLE IF NOT EXISTS authorized_chats ("
         "chat_id TEXT PRIMARY KEY, joined REAL NOT NULL, active INTEGER NOT NULL DEFAULT 1)"
+    )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS runtime_filters ("
+        "chat_id TEXT NOT NULL, scope TEXT NOT NULL, mode TEXT NOT NULL, "
+        "value TEXT NOT NULL, normalized TEXT NOT NULL, updated REAL NOT NULL, "
+        "PRIMARY KEY (chat_id, scope, mode, normalized))"
     )
     if owner_chat_id is not None:
         db.execute(
@@ -150,7 +166,77 @@ def effective_config(config, db, chat_id=None):
     for key, label in NUMBER_SETTING_LABELS.items():
         if key in stored:
             result[key] = _integer_setting(key, stored[key], label)
+    result["filter_lists"] = filter_lists(db, chat_id)
     return result
+
+
+def normalize_filter_value(value):
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def filter_lists(db, chat_id=None):
+    ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
+    result = {
+        scope: {mode: [] for mode in sorted(FILTER_MODES)}
+        for scope in FILTER_SCOPES
+    }
+    rows = db.execute(
+        "SELECT scope, mode, value FROM runtime_filters "
+        "WHERE chat_id=? ORDER BY scope, mode, normalized",
+        (_profile(chat_id),),
+    ).fetchall()
+    for scope, mode, value in rows:
+        if scope in result and mode in result[scope]:
+            result[scope][mode].append(str(value))
+    return result
+
+
+def replace_filters(db, filters, chat_id=None):
+    if not isinstance(filters, dict):
+        raise ValueError("Фильтры должны быть объектом")
+    rows = []
+    for scope in FILTER_SCOPES:
+        modes = filters.get(scope, {})
+        if not isinstance(modes, dict):
+            raise ValueError(f"Некорректный фильтр: {scope}")
+        for mode in FILTER_MODES:
+            values = modes.get(mode, [])
+            if not isinstance(values, list):
+                raise ValueError(f"Некорректный список: {scope}/{mode}")
+            unique = {}
+            for value in values:
+                text = str(value or "").strip()
+                normalized = normalize_filter_value(text)
+                if normalized:
+                    unique[normalized] = text[:120]
+            if len(unique) > 200:
+                raise ValueError("В одном списке может быть не больше 200 значений")
+            rows.extend((scope, mode, value, normalized) for normalized, value in unique.items())
+    ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
+    profile = _profile(chat_id)
+    db.execute("DELETE FROM runtime_filters WHERE chat_id=?", (profile,))
+    db.executemany(
+        "INSERT INTO runtime_filters "
+        "(chat_id, scope, mode, value, normalized, updated) "
+        "VALUES (?, ?, ?, ?, ?, unixepoch())",
+        [(profile, *row) for row in rows],
+    )
+    db.commit()
+    return filter_lists(db, chat_id)
+
+
+def item_allowed(item, config):
+    filters = config.get("filter_lists") or {}
+    for scope, item_key in FILTER_SCOPES.items():
+        groups = filters.get(scope) or {}
+        value = normalize_filter_value(item.get(item_key))
+        denied = {normalize_filter_value(entry) for entry in groups.get("deny", [])}
+        allowed = {normalize_filter_value(entry) for entry in groups.get("allow", [])}
+        if value and value in denied:
+            return False
+        if allowed and value not in allowed:
+            return False
+    return True
 
 
 def _integer_setting(key, value, label):

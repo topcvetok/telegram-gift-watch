@@ -16,7 +16,7 @@ from curl_cffi import requests
 from PIL import Image
 
 from bot import ROOT, telegram
-from runtime_settings import activate_settings, active_profiles, feature_enabled
+from runtime_settings import activate_settings, active_profiles, feature_enabled, item_allowed
 
 
 CATALOG_URL = "https://api.changes.tg/gifts"
@@ -281,6 +281,12 @@ def send_candidate(candidate, config, secrets, db, send=True):
     gift_id = f"{telegram_slug(candidate['collection'])}-{int(candidate['number'])}"
     for chat_id, user_config in active_profiles(config):
         if not feature_enabled(user_config, "dark_upgrades"):
+            continue
+        if not item_allowed({
+            "name": candidate.get("collection"),
+            "model": candidate.get("model"),
+            "backdrop": candidate.get("backdrop"),
+        }, user_config):
             continue
         recipient = str(chat_id if chat_id is not None else secrets["chat_id"])
         old = db.execute(

@@ -17,7 +17,9 @@ from bot import ROOT, telegram
 from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
 from market_data import record_market_activity
-from runtime_settings import activate_settings, active_profiles, source_enabled, threshold_ton
+from runtime_settings import (
+    activate_settings, active_profiles, item_allowed, source_enabled, threshold_ton,
+)
 from special_traits import apply_special_bases
 from tonnel_watch import apply_sales_evidence, best_score, decimal, load_rate, slug
 
@@ -266,7 +268,7 @@ def listing_link(item):
 
 
 def format_alert(item, result, config):
-    return format_market_alert(item, result, market="MRKT")
+    return format_market_alert(item, result, market="MRKT", config=config)
 
 
 def attach_cross_market_floors(
@@ -377,6 +379,7 @@ def process_event(event, config, secrets, db, session, token, send=True):
                 (chat_id, user_config)
                 for chat_id, user_config in active_profiles(config)
                 if source_enabled(user_config, "mrkt")
+                and item_allowed(item, user_config)
                 and item["price"] <= threshold_ton(
                     user_config, "max_lot", rate
                 )

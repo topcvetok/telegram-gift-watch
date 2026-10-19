@@ -137,6 +137,41 @@ class SettingsBotTests(unittest.TestCase):
             effective_config(self.config, self.db)["dark_upgrades_enabled"]
         )
 
+    def test_mini_app_payload_updates_only_submitted_settings_and_filters(self):
+        payload = {
+            "type": "save_settings",
+            "settings": {
+                "sources": {"portals": False},
+                "numbers": {"daily_report_hour": 19},
+                "filters": {
+                    "collections": {"allow": ["Plush Pepe"], "deny": []},
+                    "models": {"allow": [], "deny": ["Pumpkin"]},
+                    "backdrops": {"allow": [], "deny": []},
+                },
+            },
+        }
+        settings_bot.apply_web_app_payload(
+            __import__("json").dumps(payload), self.db, "42"
+        )
+        current = effective_config(self.config, self.db, "42")
+        self.assertEqual(current["max_lot_rub"], 2000)
+        self.assertFalse(current["portals_enabled"])
+        self.assertEqual(current["daily_report_hour"], 19)
+        self.assertEqual(
+            current["filter_lists"]["collections"]["allow"], ["Plush Pepe"]
+        )
+
+    def test_keyboard_opens_configured_mini_app(self):
+        config = dict(self.config, mini_app_url="https://example.com/app")
+        rows = settings_bot.settings_keyboard(config, self.db)["inline_keyboard"]
+        self.assertEqual(rows[0][0]["callback_data"], "settings:app")
+        with patch.object(settings_bot, "api") as telegram:
+            settings_bot.send_app_launcher(
+                {"chat_id": "42", "bot_token": "token"}, config
+            )
+        button = telegram.call_args.args[2]["reply_markup"]["keyboard"][0][0]
+        self.assertEqual(button["web_app"]["url"], "https://example.com/app")
+
     def test_price_text_accepts_spaces_and_ruble_sign(self):
         self.assertEqual(settings_bot.normalize_price_text("2 750 ₽"), ("2750", "rub"))
         with self.assertRaisesRegex(ValueError, "Введи цену"):
