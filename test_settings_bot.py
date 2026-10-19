@@ -1,6 +1,6 @@
+import json
 import sqlite3
 import unittest
-from decimal import Decimal
 from unittest.mock import patch
 
 import settings_bot
@@ -15,132 +15,65 @@ class SettingsBotTests(unittest.TestCase):
             "reserve_rub": 1000,
             "max_lot_rub": 2000,
             "min_floor_rub": 1000,
+            "mini_app_url": "https://example.com/app",
         }
+        self.secrets = {"chat_id": 42, "bot_token": "token"}
 
     def tearDown(self):
         self.db.close()
 
-    def test_exact_commands_update_both_thresholds(self):
-        self.assertEqual(
-            settings_bot.apply_command("/maxprice@mybot 25000", self.config, self.db),
-            "settings",
-        )
-        self.assertEqual(
-            settings_bot.apply_command("/minfloor 1250", self.config, self.db),
-            "settings",
-        )
-        current = effective_config(self.config, self.db)
-        self.assertEqual(current["max_lot_rub"], 25000)
-        self.assertEqual(current["min_floor_rub"], 1250)
-
-    def test_buttons_start_free_price_input(self):
-        self.assertEqual(
-            settings_bot.apply_callback(
-                "settings:input:max_lot_rub", self.config, self.db
-            ),
-            ("input", "max_lot_rub"),
-        )
-        settings_bot.begin_input(self.db, "42", "max_lot_rub")
-        self.assertEqual(settings_bot.pending_input(self.db, "42"), "max_lot_rub")
-        settings_bot.clear_input(self.db, "42")
-        self.assertIsNone(settings_bot.pending_input(self.db, "42"))
-
-    def test_settings_text_shows_live_values(self):
-        settings_bot.apply_command("/minfloor 1800", self.config, self.db)
-        text = settings_bot.settings_text(self.config, self.db)
-        self.assertIn("2 000 ₽", text)
-        self.assertIn("1 800 ₽", text)
-        self.assertNotIn("GiftChangesAPI", text)
-
-    def test_keyboard_has_price_and_market_buttons(self):
-        rows = settings_bot.settings_keyboard(self.config, self.db)["inline_keyboard"]
-        self.assertTrue(all(len(row) == 1 for row in rows))
-        labels = [row[0]["text"] for row in rows]
-        self.assertIn("💰 Ввести максимальную стоимость", labels)
-        self.assertIn("📊 Ввести минимальный floor", labels)
-        self.assertIn("✅ Tonnel", labels)
-        self.assertIn("✅ Portals", labels)
-        self.assertIn("✅ MRKT", labels)
-        self.assertIn("✅ Floor коллекции", labels)
-        self.assertIn("✅ Floor модели", labels)
-        self.assertIn("✅ Цвет фона", labels)
-        self.assertIn("✅ Красивый номер", labels)
-        self.assertIn("🔢 Разных цифр: 3", labels)
-        self.assertIn("✅ Монохром", labels)
-        self.assertIn("🎨 Совпадение: от 80%", labels)
-        self.assertIn("📈 Монохром до +15% к floor", labels)
-        self.assertIn("✅ Улучшения Black / Onyx", labels)
-        self.assertNotIn("2 000 ₽", " ".join(labels))
-
-    def test_market_button_toggles_source(self):
-        self.assertEqual(
-            settings_bot.apply_callback("settings:toggle:portals", self.config, self.db),
-            ("disabled", "portals"),
-        )
-        labels = [
-            row[0]["text"]
-            for row in settings_bot.settings_keyboard(self.config, self.db)["inline_keyboard"]
-        ]
-        self.assertIn("❌ Portals", labels)
-        self.assertEqual(
-            settings_bot.apply_callback("settings:toggle:portals", self.config, self.db),
-            ("enabled", "portals"),
-        )
-
-    def test_special_basis_buttons_toggle_and_accept_free_values(self):
-        self.assertEqual(
-            settings_bot.apply_callback(
-                "settings:feature:model_basis", self.config, self.db
-            ),
-            ("feature_disabled", "model_basis"),
-        )
-        self.assertEqual(
-            settings_bot.apply_callback(
-                "settings:feature:monochrome", self.config, self.db
-            ),
-            ("feature_disabled", "monochrome"),
-        )
-        self.assertEqual(
-            settings_bot.apply_callback(
-                "settings:number:monochrome_min_score", self.config, self.db
-            ),
-            ("input", "monochrome_min_score"),
-        )
-        self.assertEqual(
-            settings_bot.apply_callback(
-                "settings:number:monochrome_max_floor_premium_percent",
-                self.config,
-                self.db,
-            ),
-            ("input", "monochrome_max_floor_premium_percent"),
-        )
-        settings_bot.begin_input(self.db, "42", "monochrome_min_score")
-        update = {"message": {"chat": {"id": 42}, "text": "85%"}}
-        with patch.object(settings_bot, "show_settings") as show:
-            settings_bot.handle_update(
-                update, {"chat_id": 42, "bot_token": "token"}, self.config, self.db
+    def test_chat_commands_only_open_mini_app(self):
+        for command in ("/settings", "/app", "/start", "/help"):
+            self.assertEqual(
+                settings_bot.apply_command(command, self.config, self.db, "42"),
+                "app",
             )
-        self.assertEqual(
-            effective_config(self.config, self.db, "42")["monochrome_min_score"],
-            85,
-        )
-        show.assert_called_once()
 
-    def test_dark_upgrade_notifications_can_be_disabled(self):
-        self.assertEqual(
-            settings_bot.apply_callback(
-                "settings:feature:dark_upgrades", self.config, self.db
-            ),
-            ("feature_disabled", "dark_upgrades"),
+        self.assertIsNone(
+            settings_bot.apply_command(
+                "/maxprice 9000", self.config, self.db, "42"
+            )
         )
-        self.assertFalse(
-            effective_config(self.config, self.db)["dark_upgrades_enabled"]
+        self.assertIsNone(
+            settings_bot.apply_command(
+                "/minfloor 5000", self.config, self.db, "42"
+            )
         )
+        current = effective_config(self.config, self.db, "42")
+        self.assertEqual(current["max_lot_rub"], 2000)
+        self.assertEqual(current["min_floor_rub"], 1000)
 
-    def test_mini_app_payload_updates_only_submitted_settings_and_filters(self):
+    def test_settings_command_sends_only_mini_app_launcher(self):
+        update = {
+            "message": {"chat": {"id": 42}, "message_id": 7, "text": "/settings"}
+        }
+        with patch.object(settings_bot, "api") as telegram:
+            settings_bot.handle_update(update, self.secrets, self.config, self.db)
+
+        self.assertEqual(
+            [call.args[1] for call in telegram.call_args_list],
+            ["deleteMessage", "sendMessage"],
+        )
+        payload = telegram.call_args_list[1].args[2]
+        self.assertNotIn("inline_keyboard", payload["reply_markup"])
+        button = payload["reply_markup"]["keyboard"][0][0]
+        self.assertEqual(button["web_app"]["url"], "https://example.com/app")
+        self.assertNotIn("Максимальная стоимость", payload["text"])
+
+    def test_show_settings_is_a_mini_app_launcher_for_compatibility(self):
+        with patch.object(settings_bot, "api") as telegram:
+            settings_bot.show_settings(self.secrets, self.config, self.db)
+        self.assertEqual(telegram.call_args.args[1], "sendMessage")
+        self.assertIn("keyboard", telegram.call_args.args[2]["reply_markup"])
+
+    def test_mini_app_payload_updates_settings_without_chat_panel(self):
         payload = {
             "type": "save_settings",
             "settings": {
+                "prices": {
+                    "max_lot": {"value": "25", "currency": "ton"},
+                    "min_floor": {"value": "7", "currency": "ton"},
+                },
                 "sources": {"portals": False},
                 "numbers": {"daily_report_hour": 19},
                 "filters": {
@@ -150,64 +83,29 @@ class SettingsBotTests(unittest.TestCase):
                 },
             },
         }
-        settings_bot.apply_web_app_payload(
-            __import__("json").dumps(payload), self.db, "42"
-        )
+        update = {
+            "message": {
+                "chat": {"id": 42},
+                "message_id": 8,
+                "web_app_data": {"data": json.dumps(payload)},
+            }
+        }
+        with patch.object(settings_bot, "api") as telegram:
+            settings_bot.handle_update(update, self.secrets, self.config, self.db)
+
         current = effective_config(self.config, self.db, "42")
-        self.assertEqual(current["max_lot_rub"], 2000)
+        self.assertEqual(str(current["max_lot_ton"]), "25")
+        self.assertEqual(str(current["min_floor_ton"]), "7")
         self.assertFalse(current["portals_enabled"])
         self.assertEqual(current["daily_report_hour"], 19)
         self.assertEqual(
             current["filter_lists"]["collections"]["allow"], ["Plush Pepe"]
         )
-
-    def test_keyboard_opens_configured_mini_app(self):
-        config = dict(self.config, mini_app_url="https://example.com/app")
-        rows = settings_bot.settings_keyboard(config, self.db)["inline_keyboard"]
-        self.assertEqual(rows[0][0]["callback_data"], "settings:app")
-        with patch.object(settings_bot, "api") as telegram:
-            settings_bot.send_app_launcher(
-                {"chat_id": "42", "bot_token": "token"}, config
-            )
-        button = telegram.call_args.args[2]["reply_markup"]["keyboard"][0][0]
-        self.assertEqual(button["web_app"]["url"], "https://example.com/app")
-
-    def test_price_text_accepts_spaces_and_ruble_sign(self):
-        self.assertEqual(settings_bot.normalize_price_text("2 750 ₽"), ("2750", "rub"))
-        with self.assertRaisesRegex(ValueError, "Введи цену"):
-            settings_bot.normalize_price_text("две тысячи")
-
-    def test_price_text_keeps_ton_without_conversion(self):
-        self.assertEqual(settings_bot.normalize_price_text("12.5 TON"), ("12.5", "ton"))
-
-    def test_command_accepts_ton_without_budget_cap(self):
-        settings_bot.apply_command("/maxprice 25 TON", self.config, self.db)
-        current = effective_config(self.config, self.db)
-        self.assertEqual(current["max_lot_ton"], Decimal("25"))
-        self.assertIn("25 TON", settings_bot.settings_text(self.config, self.db))
-
-    def test_next_plain_message_saves_requested_price(self):
-        settings_bot.begin_input(self.db, "42", "max_lot_rub", 77)
-        update = {
-            "message": {
-                "chat": {"id": 42}, "message_id": 88, "text": "25 000 ₽"
-            }
-        }
-        with patch.object(settings_bot, "api") as telegram:
-            settings_bot.handle_update(
-                update, {"chat_id": 42, "bot_token": "token"}, self.config, self.db
-            )
         self.assertEqual(
-            effective_config(self.config, self.db, "42")["max_lot_rub"],
-            25000,
+            [call.args[1] for call in telegram.call_args_list], ["deleteMessage"]
         )
-        self.assertIsNone(settings_bot.pending_input(self.db, "42"))
-        methods = [call.args[1] for call in telegram.call_args_list]
-        self.assertEqual(methods, ["deleteMessage", "editMessageText"])
-        self.assertEqual(telegram.call_args_list[0].args[2]["message_id"], 88)
-        self.assertEqual(telegram.call_args_list[1].args[2]["message_id"], 77)
 
-    def test_callback_updates_the_same_settings_message(self):
+    def test_old_inline_buttons_no_longer_change_settings(self):
         update = {
             "callback_query": {
                 "id": "callback-1",
@@ -216,62 +114,76 @@ class SettingsBotTests(unittest.TestCase):
             }
         }
         with patch.object(settings_bot, "api") as telegram:
-            settings_bot.handle_update(
-                update, {"chat_id": 42, "bot_token": "token"}, self.config, self.db
-            )
-        methods = [call.args[1] for call in telegram.call_args_list]
-        self.assertEqual(methods, ["answerCallbackQuery", "editMessageText"])
-        self.assertEqual(telegram.call_args_list[1].args[2]["message_id"], 77)
+            settings_bot.handle_update(update, self.secrets, self.config, self.db)
 
-    def test_input_prompt_reuses_settings_message_and_remembers_it(self):
-        update = {
-            "callback_query": {
-                "id": "callback-2",
-                "data": "settings:input:max_lot_rub",
-                "message": {"chat": {"id": 42}, "message_id": 77},
-            }
-        }
-        with patch.object(settings_bot, "api") as telegram:
-            settings_bot.handle_update(
-                update, {"chat_id": 42, "bot_token": "token"}, self.config, self.db
-            )
-        methods = [call.args[1] for call in telegram.call_args_list]
-        self.assertEqual(methods, ["answerCallbackQuery", "editMessageText"])
-        self.assertEqual(settings_bot.pending_input_state(self.db, "42"), ("max_lot_rub", 77))
-        self.assertEqual(telegram.call_args_list[1].args[2]["message_id"], 77)
+        self.assertTrue(effective_config(self.config, self.db, "42")["portals_enabled"])
+        self.assertEqual(
+            [call.args[1] for call in telegram.call_args_list],
+            ["answerCallbackQuery", "sendMessage"],
+        )
+        self.assertEqual(
+            telegram.call_args_list[0].args[2]["text"],
+            "Настройки перенесены в Mini App",
+        )
 
-    def test_existing_input_table_is_migrated_for_message_reuse(self):
+    def test_plain_chat_message_does_not_complete_old_input(self):
+        settings_bot.ensure_input_table(self.db)
         self.db.execute(
-            "CREATE TABLE settings_input "
-            "(chat_id TEXT PRIMARY KEY, setting_key TEXT NOT NULL)"
+            "INSERT INTO settings_input (chat_id, setting_key, message_id) "
+            "VALUES (?, ?, ?)",
+            ("42", "max_lot_rub", 77),
         )
         self.db.commit()
-        settings_bot.begin_input(self.db, "42", "max_lot_rub", 77)
+        update = {
+            "message": {"chat": {"id": 42}, "message_id": 88, "text": "9000"}
+        }
+        with patch.object(settings_bot, "api") as telegram:
+            settings_bot.handle_update(update, self.secrets, self.config, self.db)
+        self.assertEqual(effective_config(self.config, self.db, "42")["max_lot_rub"], 2000)
+        telegram.assert_not_called()
+
+    def test_legacy_settings_panels_and_pending_inputs_are_removed(self):
+        settings_bot.remember_settings_message(self.db, "42", 77)
+        settings_bot.remember_settings_message(self.db, "99", 88)
+        settings_bot.ensure_input_table(self.db)
+        self.db.execute(
+            "INSERT INTO settings_input (chat_id, setting_key, message_id) "
+            "VALUES (?, ?, ?)",
+            ("42", "max_lot_rub", 77),
+        )
+        self.db.commit()
+        with patch.object(settings_bot, "api") as telegram:
+            settings_bot.remove_legacy_settings_views(self.secrets, self.db)
+
         self.assertEqual(
-            settings_bot.pending_input_state(self.db, "42"),
-            ("max_lot_rub", 77),
+            [call.args[2]["message_id"] for call in telegram.call_args_list],
+            [77, 88],
+        )
+        self.assertIsNone(settings_bot.remembered_settings_message(self.db, "42"))
+        self.assertIsNone(
+            self.db.execute(
+                "SELECT setting_key FROM settings_input WHERE chat_id=?", ("42",)
+            ).fetchone()
         )
 
-    def test_settings_view_is_remembered_for_later_updates(self):
-        secrets = {"chat_id": 42, "bot_token": "token"}
-        with patch.object(
-            settings_bot,
-            "api",
-            side_effect=[{"message_id": 77}, {"message_id": 77}],
-        ) as telegram:
-            settings_bot.show_settings(secrets, self.config, self.db)
-            settings_bot.show_settings(secrets, self.config, self.db)
-        self.assertEqual(telegram.call_args_list[0].args[1], "sendMessage")
-        self.assertEqual(telegram.call_args_list[1].args[1], "editMessageText")
-        self.assertEqual(telegram.call_args_list[1].args[2]["message_id"], 77)
+    def test_run_registers_no_chat_setting_commands(self):
+        with (
+            patch.object(settings_bot, "api") as telegram,
+            patch.object(settings_bot.time, "monotonic", side_effect=[0, 2]),
+            patch.object(settings_bot, "remove_legacy_settings_views") as cleanup,
+        ):
+            settings_bot.run(self.config, self.secrets, self.db, duration=1)
 
-    def test_join_code_authorizes_guest_with_independent_settings(self):
+        commands = telegram.call_args_list[0].args[2]["commands"]
+        self.assertEqual(
+            [item["command"] for item in commands],
+            ["settings", "app", "join", "leave"],
+        )
+        cleanup.assert_called_once_with(self.secrets, self.db)
+
+    def test_join_code_authorizes_guest_and_opens_mini_app(self):
         set_setting(self.db, "max_lot_rub", 3000, chat_id="42")
-        secrets = {
-            "chat_id": 42,
-            "bot_token": "token",
-            "access_code": "family-code",
-        }
+        secrets = dict(self.secrets, access_code="family-code")
         join = {
             "message": {
                 "chat": {"id": 99},
@@ -279,43 +191,26 @@ class SettingsBotTests(unittest.TestCase):
                 "text": "/join family-code",
             }
         }
-        with patch.object(
-            settings_bot, "api", side_effect=[True, {"message_id": 8}]
-        ):
+        with patch.object(settings_bot, "api") as telegram:
             settings_bot.handle_update(join, secrets, self.config, self.db)
+
         self.assertTrue(is_authorized(self.db, "99", "42"))
+        self.assertEqual(
+            [call.args[1] for call in telegram.call_args_list],
+            ["deleteMessage", "sendMessage"],
+        )
         self.assertEqual(
             effective_config(self.config, self.db, "99")["max_lot_rub"], 2000
         )
 
-        change = {
-            "message": {
-                "chat": {"id": 99},
-                "message_id": 9,
-                "text": "/maxprice 9000",
-            }
-        }
-        with patch.object(settings_bot, "api", return_value={"message_id": 8}):
-            settings_bot.handle_update(change, secrets, self.config, self.db)
-        self.assertEqual(
-            effective_config(self.config, self.db, "99")["max_lot_rub"], 9000
-        )
-        self.assertEqual(
-            effective_config(self.config, self.db, "42")["max_lot_rub"], 3000
-        )
-
     def test_wrong_join_code_does_not_authorize_guest(self):
+        secrets = dict(self.secrets, access_code="right")
         update = {
             "message": {
                 "chat": {"id": 99},
                 "message_id": 7,
                 "text": "/join wrong",
             }
-        }
-        secrets = {
-            "chat_id": 42,
-            "bot_token": "token",
-            "access_code": "right",
         }
         with patch.object(settings_bot, "api") as telegram:
             settings_bot.handle_update(update, secrets, self.config, self.db)

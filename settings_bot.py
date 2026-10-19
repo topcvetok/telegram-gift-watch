@@ -2,22 +2,17 @@
 
 import argparse
 import json
-import re
 import sqlite3
 import sys
 import time
-from decimal import Decimal
 
 from bot import ROOT, request_json
 from runtime_settings import (
     FEATURE_LABELS,
     NUMBER_SETTING_LABELS,
-    SETTING_LABELS,
     SOURCE_LABELS,
     activate_settings,
     authorize_chat,
-    effective_config,
-    feature_enabled,
     is_authorized,
     revoke_chat,
     replace_filters,
@@ -25,7 +20,6 @@ from runtime_settings import (
     set_number_setting,
     set_setting,
     set_source_enabled,
-    source_enabled,
 )
 
 
@@ -39,139 +33,6 @@ def api(secrets, method, payload=None):
         detail = f": {description}" if description else ""
         raise RuntimeError(f"Telegram не подтвердил {method}{detail}")
     return result.get("result")
-
-
-def settings_text(config, db, chat_id=None):
-    current = effective_config(config, db, chat_id)
-    sources = "\n".join(
-        f"{'✅' if source_enabled(current, source) else '❌'} {label}"
-        for source, label in SOURCE_LABELS.items()
-    )
-    reasons = "\n".join((
-        f"{'✅' if feature_enabled(current, 'collection_basis') else '❌'} Floor коллекции",
-        f"{'✅' if feature_enabled(current, 'model_basis') else '❌'} Floor модели",
-        f"{'✅' if feature_enabled(current, 'backdrop_basis') else '❌'} Цвет фона",
-        f"{'✅' if feature_enabled(current, 'beautiful_number') else '❌'} "
-        f"Красивый номер: ≤ <b>{current.get('beautiful_number_max_distinct_digits', 3)}</b> разных цифр",
-        f"{'✅' if feature_enabled(current, 'monochrome') else '❌'} "
-        f"Монохром: от <b>{current.get('monochrome_min_score', 80)}%</b>, "
-        f"цена до <b>+{current.get('monochrome_max_floor_premium_percent', 15)}%</b> к floor модели",
-    ))
-    upgrades = (
-        f"{'✅' if feature_enabled(current, 'dark_upgrades') else '❌'} "
-        "Новые улучшения с Black / Onyx Black"
-    )
-    filters = current.get("filter_lists") or {}
-    allow_count = sum(len((filters.get(scope) or {}).get("allow", [])) for scope in filters)
-    deny_count = sum(len((filters.get(scope) or {}).get("deny", [])) for scope in filters)
-    report = (
-        f"{'✅' if feature_enabled(current, 'daily_report') else '❌'} "
-        f"Ежедневный отчёт в {int(current.get('daily_report_hour', 21)):02d}:00 МСК"
-    )
-    return (
-        "<b>Настройки Gift Watch</b>\n\n"
-        f"💰 Максимальная стоимость: <b>{format_threshold(current, 'max_lot')}</b>\n"
-        f"📊 Минимальный floor: <b>{format_threshold(current, 'min_floor')}</b>\n\n"
-        f"<b>Основания:</b>\n{reasons}\n\n"
-        f"<b>Другие уведомления:</b>\n{upgrades}\n{report}\n\n"
-        f"<b>Площадки:</b>\n{sources}\n\n"
-        f"<b>Фильтры:</b> белый список — {allow_count}, чёрный — {deny_count}\n\n"
-        "Нажми кнопку и отправь новое значение. "
-        "Цены и переключатели применяются сразу."
-    )
-
-
-def format_rubles(value):
-    return f"{int(value):,}".replace(",", " ")
-
-
-def format_threshold(config, name):
-    ton_key = f"{name}_ton"
-    if ton_key in config:
-        value = format(Decimal(str(config[ton_key])), "f")
-        if "." in value:
-            value = value.rstrip("0").rstrip(".")
-        return f"{value or '0'} TON"
-    return f"{format_rubles(config[f'{name}_rub'])} ₽"
-
-
-def settings_keyboard(config, db, chat_id=None):
-    current = effective_config(config, db, chat_id)
-    source_rows = [[{
-        "text": f"{'✅' if source_enabled(current, source) else '❌'} {label}",
-        "callback_data": f"settings:toggle:{source}",
-    }] for source, label in SOURCE_LABELS.items()]
-    feature_rows = [
-        [{
-            "text": f"{'✅' if feature_enabled(current, 'collection_basis') else '❌'} Floor коллекции",
-            "callback_data": "settings:feature:collection_basis",
-        }],
-        [{
-            "text": f"{'✅' if feature_enabled(current, 'model_basis') else '❌'} Floor модели",
-            "callback_data": "settings:feature:model_basis",
-        }],
-        [{
-            "text": f"{'✅' if feature_enabled(current, 'backdrop_basis') else '❌'} Цвет фона",
-            "callback_data": "settings:feature:backdrop_basis",
-        }],
-        [{
-            "text": f"{'✅' if feature_enabled(current, 'beautiful_number') else '❌'} Красивый номер",
-            "callback_data": "settings:feature:beautiful_number",
-        }],
-        [{
-            "text": f"🔢 Разных цифр: {current.get('beautiful_number_max_distinct_digits', 3)}",
-            "callback_data": "settings:number:beautiful_number_max_distinct_digits",
-        }],
-        [{
-            "text": f"{'✅' if feature_enabled(current, 'monochrome') else '❌'} Монохром",
-            "callback_data": "settings:feature:monochrome",
-        }],
-        [{
-            "text": f"🎨 Совпадение: от {current.get('monochrome_min_score', 80)}%",
-            "callback_data": "settings:number:monochrome_min_score",
-        }],
-        [{
-            "text": f"📈 Монохром до +{current.get('monochrome_max_floor_premium_percent', 15)}% к floor",
-            "callback_data": "settings:number:monochrome_max_floor_premium_percent",
-        }],
-        [{
-            "text": (
-                f"{'✅' if feature_enabled(current, 'dark_upgrades') else '❌'} "
-                "Улучшения Black / Onyx"
-            ),
-            "callback_data": "settings:feature:dark_upgrades",
-        }],
-        [{
-            "text": (
-                f"{'✅' if feature_enabled(current, 'daily_report') else '❌'} "
-                "Ежедневный отчёт"
-            ),
-            "callback_data": "settings:feature:daily_report",
-        }],
-        [{
-            "text": f"🕘 Отчёт в {int(current.get('daily_report_hour', 21)):02d}:00 МСК",
-            "callback_data": "settings:number:daily_report_hour",
-        }],
-    ]
-    rows = [
-        [{
-            "text": "💰 Ввести максимальную стоимость",
-            "callback_data": "settings:input:max_lot_rub",
-        }],
-        [{
-            "text": "📊 Ввести минимальный floor",
-            "callback_data": "settings:input:min_floor_rub",
-        }],
-        *feature_rows,
-        *source_rows,
-        [{"text": "🔄 Обновить настройки", "callback_data": "settings:refresh"}],
-    ]
-    if str(config.get("mini_app_url") or "").strip():
-        rows.insert(0, [{
-            "text": "⚙️ Открыть Mini App",
-            "callback_data": "settings:app",
-        }])
-    return {"inline_keyboard": rows}
 
 
 def ensure_view_table(db):
@@ -202,35 +63,8 @@ def remember_settings_message(db, chat_id, message_id):
 
 
 def show_settings(secrets, config, db, *, message_id=None):
-    if message_id is None:
-        message_id = remembered_settings_message(db, secrets["chat_id"])
-    payload = {
-        "chat_id": secrets["chat_id"],
-        "text": settings_text(config, db, secrets["chat_id"]),
-        "parse_mode": "HTML",
-        "reply_markup": settings_keyboard(config, db, secrets["chat_id"]),
-        "link_preview_options": {"is_disabled": True},
-    }
-    method = "sendMessage"
-    if message_id is not None:
-        method = "editMessageText"
-        payload["message_id"] = message_id
-    try:
-        result = api(secrets, method, payload)
-    except RuntimeError as exc:
-        if "message is not modified" in str(exc):
-            return None
-        if method != "editMessageText":
-            raise
-        payload.pop("message_id", None)
-        result = api(secrets, "sendMessage", payload)
-    returned_message_id = result.get("message_id") if isinstance(result, dict) else None
-    remember_settings_message(
-        db,
-        secrets["chat_id"],
-        returned_message_id if returned_message_id is not None else message_id,
-    )
-    return result
+    """Compatibility entry point: settings now live only in the Mini App."""
+    return send_app_launcher(secrets, config)
 
 
 def send_text(secrets, text):
@@ -261,43 +95,6 @@ def send_app_launcher(secrets, config):
     })
 
 
-def send_input_prompt(secrets, key, config, *, message_id=None, error=None):
-    if key == "max_lot_rub":
-        text = (
-            "Введи максимальную стоимость подарка от 1 ₽. "
-            "Например: <b>5000 ₽</b> или <b>25 TON</b>"
-        )
-    elif key == "min_floor_rub":
-        text = "Введи минимальный floor. Например: <b>1200 ₽</b> или <b>6 TON</b>"
-    elif key == "beautiful_number_max_distinct_digits":
-        text = "Сколько разных цифр максимум может быть в красивом номере? Введи число от <b>1</b> до <b>10</b>."
-    elif key == "monochrome_max_floor_premium_percent":
-        text = "На сколько процентов цена монохрома может быть выше floor модели? Введи число от <b>0</b> до <b>100</b>. Сейчас рекомендуется <b>15</b>."
-    elif key == "daily_report_hour":
-        text = "Введи час ежедневного отчёта по Москве: целое число от <b>0</b> до <b>23</b>."
-    else:
-        text = "Введи минимальное совпадение модели и фона от <b>0</b> до <b>100</b> процентов. Для сильного монохрома рекомендуется <b>80</b>."
-    if error:
-        text = f"⚠️ {error}\n\n{text}"
-    payload = {
-        "chat_id": secrets["chat_id"],
-        "text": text,
-        "parse_mode": "HTML",
-        "reply_markup": {
-            "inline_keyboard": [[{
-                "text": "↩️ Отменить ввод",
-                "callback_data": "settings:cancel",
-            }]],
-        },
-        "link_preview_options": {"is_disabled": True},
-    }
-    method = "sendMessage"
-    if message_id is not None:
-        method = "editMessageText"
-        payload["message_id"] = message_id
-    return api(secrets, method, payload)
-
-
 def ensure_input_table(db):
     db.execute(
         "CREATE TABLE IF NOT EXISTS settings_input "
@@ -307,31 +104,6 @@ def ensure_input_table(db):
     if "message_id" not in columns:
         db.execute("ALTER TABLE settings_input ADD COLUMN message_id INTEGER")
     db.commit()
-
-
-def begin_input(db, chat_id, key, message_id=None):
-    if key not in SETTING_LABELS and key not in NUMBER_SETTING_LABELS:
-        raise ValueError("Неизвестная настройка")
-    ensure_input_table(db)
-    db.execute(
-        "INSERT OR REPLACE INTO settings_input "
-        "(chat_id, setting_key, message_id) VALUES (?, ?, ?)",
-        (str(chat_id), key, message_id),
-    )
-    db.commit()
-
-
-def pending_input(db, chat_id):
-    return pending_input_state(db, chat_id)[0]
-
-
-def pending_input_state(db, chat_id):
-    ensure_input_table(db)
-    row = db.execute(
-        "SELECT setting_key, message_id FROM settings_input WHERE chat_id=?",
-        (str(chat_id),),
-    ).fetchone()
-    return (row[0], row[1]) if row else (None, None)
 
 
 def clear_input(db, chat_id):
@@ -352,27 +124,16 @@ def delete_message(secrets, message_id):
         pass
 
 
-def normalize_price_text(text, db=None):
-    value = str(text or "").strip().casefold().replace(" ", "")
-    match = re.fullmatch(
-        r"(\d+(?:[.,]\d+)?)(ton|тон|₽|rub|руб|рублей|р)?", value
-    )
-    if not match:
-        raise ValueError("Введи цену, например: 2500 ₽ или 12.5 TON")
-    number, currency = match.groups()
-    if currency in ("ton", "тон"):
-        amount = Decimal(number.replace(",", "."))
-        return format(amount, "f"), "ton"
-    if not number.isdecimal():
-        raise ValueError("Сумму в рублях укажи целым числом")
-    return number, "rub"
-
-
-def normalize_integer_text(text):
-    value = str(text or "").strip().replace("%", "").strip()
-    if not value.isdecimal():
-        raise ValueError("Введи целое число")
-    return int(value)
+def remove_legacy_settings_views(secrets, db):
+    """Delete remembered chat settings panels and cancel old text-input flows."""
+    ensure_view_table(db)
+    rows = db.execute("SELECT chat_id, message_id FROM settings_view").fetchall()
+    for chat_id, message_id in rows:
+        delete_message(dict(secrets, chat_id=str(chat_id)), message_id)
+    db.execute("DELETE FROM settings_view")
+    ensure_input_table(db)
+    db.execute("DELETE FROM settings_input")
+    db.commit()
 
 
 def parse_command(text):
@@ -384,58 +145,10 @@ def parse_command(text):
 
 
 def apply_command(text, config, db, chat_id=None):
-    command, args = parse_command(text)
-    if command == "/app":
+    command, _ = parse_command(text)
+    if command in ("/app", "/settings", "/start", "/help"):
         return "app"
-    if command in ("/settings", "/start", "/help"):
-        return "settings"
-    if command == "/cancel":
-        return "cancel"
-    mapping = {"/maxprice": "max_lot_rub", "/minfloor": "min_floor_rub"}
-    key = mapping.get(command)
-    if key is None:
-        return None
-    if not args:
-        example = "/maxprice 2500" if key == "max_lot_rub" else "/minfloor 1200"
-        raise ValueError(f"Формат команды: {example}")
-    value, currency = normalize_price_text(" ".join(args))
-    set_setting(db, key, value, currency=currency, chat_id=chat_id)
-    return "settings"
-
-
-def apply_callback(data, config, db, chat_id=None):
-    if data == "settings:app":
-        return "app", None
-    if data == "settings:refresh":
-        return "refresh", None
-    if data == "settings:cancel":
-        return "cancel", None
-    parts = str(data or "").split(":")
-    if len(parts) == 3 and parts[:2] == ["settings", "toggle"]:
-        source = parts[2]
-        current = effective_config(config, db, chat_id)
-        enabled = set_source_enabled(
-            db, source, not source_enabled(current, source), chat_id=chat_id
-        )
-        return ("enabled" if enabled else "disabled"), source
-    if len(parts) == 3 and parts[:2] == ["settings", "feature"]:
-        feature = parts[2]
-        current = effective_config(config, db, chat_id)
-        enabled = set_feature_enabled(
-            db, feature, not feature_enabled(current, feature), chat_id=chat_id
-        )
-        return ("feature_enabled" if enabled else "feature_disabled"), feature
-    if len(parts) == 3 and parts[:2] == ["settings", "number"]:
-        key = parts[2]
-        if key not in NUMBER_SETTING_LABELS:
-            raise ValueError("Неизвестная настройка")
-        return "input", key
-    if len(parts) != 3 or parts[:2] != ["settings", "input"]:
-        raise ValueError("Неизвестная кнопка")
-    key = parts[2]
-    if key not in SETTING_LABELS:
-        raise ValueError("Неизвестная настройка")
-    return "input", key
+    return None
 
 
 def apply_web_app_payload(data, db, chat_id=None):
@@ -487,7 +200,7 @@ def handle_update(update, secrets, config, db):
                 if " ".join(args) == str(secrets["access_code"]):
                     authorize_chat(db, chat_id)
                     delete_message(chat_secrets, message.get("message_id"))
-                    show_settings(chat_secrets, config, db)
+                    send_app_launcher(chat_secrets, config)
                 else:
                     send_text(chat_secrets, "Неверный код доступа.")
             return
@@ -500,57 +213,18 @@ def handle_update(update, secrets, config, db):
         if isinstance(web_app_data, dict):
             try:
                 apply_web_app_payload(web_app_data.get("data"), db, chat_id)
-                show_settings(chat_secrets, config, db)
+                delete_message(chat_secrets, message.get("message_id"))
             except ValueError as exc:
                 send_text(chat_secrets, f"Не удалось сохранить настройки: {exc}")
             return
-        key, settings_message_id = pending_input_state(db, chat_id)
         try:
-            if key is not None and not command.startswith("/"):
-                if key in SETTING_LABELS:
-                    value, currency = normalize_price_text(text)
-                    set_setting(
-                        db, key, value, currency=currency, chat_id=chat_id
-                    )
-                else:
-                    set_number_setting(
-                        db, key, normalize_integer_text(text), chat_id=chat_id
-                    )
-                clear_input(db, chat_id)
-                delete_message(chat_secrets, message.get("message_id"))
-                show_settings(
-                    chat_secrets, config, db, message_id=settings_message_id
-                )
-                return
             action = apply_command(text, config, db, chat_id)
-            if action == "settings":
-                clear_input(db, chat_id)
-                delete_message(chat_secrets, message.get("message_id"))
-                show_settings(
-                    chat_secrets, config, db, message_id=settings_message_id
-                )
-            elif action == "app":
+            if action == "app":
                 clear_input(db, chat_id)
                 delete_message(chat_secrets, message.get("message_id"))
                 send_app_launcher(chat_secrets, config)
-            elif action == "cancel":
-                clear_input(db, chat_id)
-                delete_message(chat_secrets, message.get("message_id"))
-                show_settings(
-                    chat_secrets, config, db, message_id=settings_message_id
-                )
         except ValueError as exc:
-            if key is not None and settings_message_id is not None:
-                delete_message(chat_secrets, message.get("message_id"))
-                send_input_prompt(
-                    chat_secrets,
-                    key,
-                    config,
-                    message_id=settings_message_id,
-                    error=str(exc),
-                )
-            else:
-                send_text(chat_secrets, f"{exc}\nПопробуй ещё раз или отправь /cancel.")
+            send_text(chat_secrets, str(exc))
         return
 
     callback = update.get("callback_query") if isinstance(update, dict) else None
@@ -565,61 +239,25 @@ def handle_update(update, secrets, config, db):
         return
     chat_secrets = dict(secrets, chat_id=chat_id)
     callback_id = callback.get("id")
-    settings_message_id = callback_message.get("message_id")
-    try:
-        action, key = apply_callback(callback.get("data"), config, db, chat_id)
-        if callback_id:
-            if action == "input":
-                answer = "Теперь введи значение"
-            elif action == "app":
-                answer = "Кнопка Mini App отправлена"
-            elif action == "cancel":
-                answer = "Ввод отменён"
-            elif action in ("enabled", "disabled"):
-                answer = f"{SOURCE_LABELS[key]} {'включён' if action == 'enabled' else 'отключён'}"
-            elif action in ("feature_enabled", "feature_disabled"):
-                answer = f"{FEATURE_LABELS[key]} {'включён' if action == 'feature_enabled' else 'отключён'}"
-            else:
-                answer = "Настройки обновлены"
-            api(chat_secrets, "answerCallbackQuery", {
-                "callback_query_id": callback_id,
-                "text": answer,
-            })
-        if action == "app":
-            send_app_launcher(chat_secrets, config)
-        elif action == "input":
-            begin_input(db, chat_id, key, settings_message_id)
-            send_input_prompt(
-                chat_secrets, key, config, message_id=settings_message_id
-            )
-        else:
-            if action == "cancel":
-                clear_input(db, chat_id)
-            show_settings(
-                chat_secrets, config, db, message_id=settings_message_id
-            )
-    except ValueError as exc:
-        if callback_id:
-            api(chat_secrets, "answerCallbackQuery", {
-                "callback_query_id": callback_id,
-                "text": str(exc),
-                "show_alert": True,
-            })
+    if callback_id:
+        api(chat_secrets, "answerCallbackQuery", {
+            "callback_query_id": callback_id,
+            "text": "Настройки перенесены в Mini App",
+        })
+    send_app_launcher(chat_secrets, config)
 
 
 def run(config, secrets, db, duration=3300):
     api(secrets, "setMyCommands", {"commands": [
-        {"command": "settings", "description": "Цена покупки и минимальный floor"},
+        {"command": "settings", "description": "Открыть настройки Mini App"},
         {"command": "app", "description": "Открыть настройки Mini App"},
-        {"command": "maxprice", "description": "Максимальная цена в рублях"},
-        {"command": "minfloor", "description": "Минимальный floor в рублях"},
-        {"command": "cancel", "description": "Отменить ввод цены"},
         {"command": "join", "description": "Войти по коду доступа"},
         {"command": "leave", "description": "Отключить доступ"},
     ]})
     # Data-saving Mini Apps must be opened from a reply-keyboard Web App button.
     # Keep the permanent menu on commands; /app sends the compatible launcher.
     api(secrets, "setChatMenuButton", {"menu_button": {"type": "commands"}})
+    remove_legacy_settings_views(secrets, db)
     deadline = time.monotonic() + max(1, int(duration))
     offset = None
     while time.monotonic() < deadline:
