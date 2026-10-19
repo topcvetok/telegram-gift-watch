@@ -50,6 +50,7 @@ class SettingsBotTests(unittest.TestCase):
         text = settings_bot.settings_text(self.config, self.db)
         self.assertIn("2 000 ₽", text)
         self.assertIn("1 800 ₽", text)
+        self.assertNotIn("GiftChangesAPI", text)
 
     def test_keyboard_has_price_and_market_buttons(self):
         rows = settings_bot.settings_keyboard(self.config, self.db)["inline_keyboard"]
