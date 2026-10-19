@@ -140,7 +140,10 @@ def message(item, result, rule, complete):
             + "Перед покупкой проверь доступность и ограничения.\n" + link)
 
 
-def telegram(secrets, text, *, preview_url=None, button_url=None):
+def telegram(
+    secrets, text, *, preview_url=None, button_url=None,
+    button_text="Открыть оффер",
+):
     preview_options = {"is_disabled": True}
     if preview_url:
         preview_options = {
@@ -157,7 +160,7 @@ def telegram(secrets, text, *, preview_url=None, button_url=None):
     }
     if button_url:
         payload["reply_markup"] = {
-            "inline_keyboard": [[{"text": "Открыть оффер", "url": button_url}]]
+            "inline_keyboard": [[{"text": button_text, "url": button_url}]]
         }
     result = request_json(
         f"https://api.telegram.org/bot{secrets['bot_token']}/sendMessage",

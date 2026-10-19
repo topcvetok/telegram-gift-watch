@@ -20,6 +20,7 @@ FEATURE_LABELS = {
     "backdrop_basis": "Цвет фона",
     "beautiful_number": "Красивый номер",
     "monochrome": "Монохром",
+    "dark_upgrades": "Улучшения Black / Onyx Black",
 }
 NUMBER_SETTING_LABELS = {
     "beautiful_number_max_distinct_digits": "максимум разных цифр в номере",

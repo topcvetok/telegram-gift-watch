@@ -56,14 +56,20 @@ def settings_text(config, db, chat_id=None):
         f"Монохром: от <b>{current.get('monochrome_min_score', 80)}%</b>, "
         f"цена до <b>+{current.get('monochrome_max_floor_premium_percent', 15)}%</b> к floor модели",
     ))
+    upgrades = (
+        f"{'✅' if feature_enabled(current, 'dark_upgrades') else '❌'} "
+        "Новые улучшения с Black / Onyx Black"
+    )
     return (
         "<b>Настройки Gift Watch</b>\n\n"
         f"💰 Максимальная стоимость: <b>{format_threshold(current, 'max_lot')}</b>\n"
         f"📊 Минимальный floor: <b>{format_threshold(current, 'min_floor')}</b>\n\n"
         f"<b>Основания:</b>\n{reasons}\n\n"
+        f"<b>Другие уведомления:</b>\n{upgrades}\n\n"
         f"<b>Площадки:</b>\n{sources}\n\n"
         "Нажми кнопку и отправь новое значение. "
-        "Цены и переключатели применяются сразу."
+        "Цены и переключатели применяются сразу.\n\n"
+        "<i>Каталог коллекций для улучшений: @GiftChangesAPI</i>"
     )
 
 
@@ -119,6 +125,13 @@ def settings_keyboard(config, db, chat_id=None):
         [{
             "text": f"📈 Монохром до +{current.get('monochrome_max_floor_premium_percent', 15)}% к floor",
             "callback_data": "settings:number:monochrome_max_floor_premium_percent",
+        }],
+        [{
+            "text": (
+                f"{'✅' if feature_enabled(current, 'dark_upgrades') else '❌'} "
+                "Улучшения Black / Onyx"
+            ),
+            "callback_data": "settings:feature:dark_upgrades",
         }],
     ]
     return {"inline_keyboard": [

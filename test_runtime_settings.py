@@ -67,6 +67,7 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertTrue(feature_enabled(current, "backdrop_basis"))
         self.assertTrue(feature_enabled(current, "beautiful_number"))
         self.assertTrue(feature_enabled(current, "monochrome"))
+        self.assertTrue(feature_enabled(current, "dark_upgrades"))
         set_feature_enabled(self.db, "monochrome", False)
         set_feature_enabled(self.db, "collection_basis", False)
         set_number_setting(self.db, "beautiful_number_max_distinct_digits", 2)

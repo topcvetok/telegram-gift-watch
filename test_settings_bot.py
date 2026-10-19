@@ -68,6 +68,7 @@ class SettingsBotTests(unittest.TestCase):
         self.assertIn("✅ Монохром", labels)
         self.assertIn("🎨 Совпадение: от 80%", labels)
         self.assertIn("📈 Монохром до +15% к floor", labels)
+        self.assertIn("✅ Улучшения Black / Onyx", labels)
         self.assertNotIn("2 000 ₽", " ".join(labels))
 
     def test_market_button_toggles_source(self):
@@ -123,6 +124,17 @@ class SettingsBotTests(unittest.TestCase):
             85,
         )
         show.assert_called_once()
+
+    def test_dark_upgrade_notifications_can_be_disabled(self):
+        self.assertEqual(
+            settings_bot.apply_callback(
+                "settings:feature:dark_upgrades", self.config, self.db
+            ),
+            ("feature_disabled", "dark_upgrades"),
+        )
+        self.assertFalse(
+            effective_config(self.config, self.db)["dark_upgrades_enabled"]
+        )
 
     def test_price_text_accepts_spaces_and_ruble_sign(self):
         self.assertEqual(settings_bot.normalize_price_text("2 750 ₽"), ("2750", "rub"))
