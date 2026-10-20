@@ -73,8 +73,11 @@ class SettingsBotTests(unittest.TestCase):
                 "prices": {
                     "max_lot": {"value": "25", "currency": "ton"},
                     "min_floor": {"value": "7", "currency": "ton"},
+                    "upgrade_min_floor": {"value": "10.5", "currency": "ton"},
                 },
                 "sources": {"portals": False},
+                "features": {"valuable_upgrades": True},
+                "upgrade_backdrops": ["Azure Blue", "Coral Red"],
                 "numbers": {"daily_report_hour": 19},
                 "filters": {
                     "collections": {"allow": ["Plush Pepe"], "deny": []},
@@ -96,6 +99,9 @@ class SettingsBotTests(unittest.TestCase):
         current = effective_config(self.config, self.db, "42")
         self.assertEqual(str(current["max_lot_ton"]), "25")
         self.assertEqual(str(current["min_floor_ton"]), "7")
+        self.assertEqual(str(current["upgrade_min_floor_ton"]), "10.5")
+        self.assertEqual(current["upgrade_backdrops"], ["Azure Blue", "Coral Red"])
+        self.assertTrue(current["valuable_upgrades_enabled"])
         self.assertFalse(current["portals_enabled"])
         self.assertEqual(current["daily_report_hour"], 19)
         self.assertEqual(

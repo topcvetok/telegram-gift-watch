@@ -8,7 +8,7 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root{--bg:var(--tg-theme-bg-color,#0b0f16);--card:var(--tg-theme-secondary-bg-color,#151b26);--text:var(--tg-theme-text-color,#f4f7fb);--muted:var(--tg-theme-hint-color,#8d98aa);--accent:var(--tg-theme-button-color,#2f80ed);--accentText:var(--tg-theme-button-text-color,#fff);--line:rgba(145,160,180,.18);--good:#40c98b;--bad:#ff6577}
-    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:680px;margin:auto;padding:18px 14px 110px}.hero{padding:10px 4px 18px}.hero h1{font-size:27px;margin:0 0 6px}.hero p{margin:0;color:var(--muted)}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px}.card h2{font-size:16px;margin:0 0 14px}.row{display:flex;align-items:center;gap:10px;margin:10px 0}.row label{flex:1}.sub{display:block;color:var(--muted);font-size:12px;margin-top:2px}.price{display:grid;grid-template-columns:1fr 90px;gap:8px;margin:10px 0}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.12);color:var(--text);padding:12px;font:inherit;outline:none}input:focus,select:focus,textarea:focus{border-color:var(--accent)}textarea{min-height:92px;resize:vertical}.switch{position:relative;width:46px;height:28px;flex:0 0 auto}.switch input{display:none}.slider{position:absolute;inset:0;border-radius:20px;background:#657080;transition:.18s}.slider:before{content:"";position:absolute;width:22px;height:22px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.18s}.switch input:checked+.slider{background:var(--accent)}.switch input:checked+.slider:before{transform:translateX(18px)}.tabs{display:flex;padding:3px;background:rgba(0,0,0,.13);border-radius:12px;margin-bottom:12px}.tab{flex:1;border:0;border-radius:9px;padding:9px;background:transparent;color:var(--muted);font-weight:650}.tab.active{background:var(--accent);color:var(--accentText)}.filter-panel{display:none}.filter-panel.active{display:block}.filter-grid{display:grid;gap:10px}.filter-grid label{font-size:13px;font-weight:650}.footer{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 30%)}.save{display:block;width:min(652px,100%);margin:auto;border:0;border-radius:14px;padding:14px;background:var(--accent);color:var(--accentText);font-weight:750;font-size:16px}.save:disabled{opacity:.45}.note{font-size:12px;color:var(--muted);margin:8px 2px 0}.pill{display:inline-block;border-radius:999px;padding:4px 8px;background:rgba(64,201,139,.13);color:var(--good);font-size:12px;font-weight:700}.error{color:var(--bad)}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:680px;margin:auto;padding:18px 14px 110px}.hero{padding:10px 4px 18px}.hero h1{font-size:27px;margin:0 0 6px}.hero p{margin:0;color:var(--muted)}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px}.card h2{font-size:16px;margin:0 0 14px}.row{display:flex;align-items:center;gap:10px;margin:10px 0}.row label{flex:1}.sub{display:block;color:var(--muted);font-size:12px;margin-top:2px}.price{display:grid;grid-template-columns:1fr 90px;gap:8px;margin:10px 0}.unit{display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.12);font-weight:700;color:var(--muted)}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.12);color:var(--text);padding:12px;font:inherit;outline:none}input:focus,select:focus,textarea:focus{border-color:var(--accent)}textarea{min-height:92px;resize:vertical}.switch{position:relative;width:46px;height:28px;flex:0 0 auto}.switch input{display:none}.slider{position:absolute;inset:0;border-radius:20px;background:#657080;transition:.18s}.slider:before{content:"";position:absolute;width:22px;height:22px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.18s}.switch input:checked+.slider{background:var(--accent)}.switch input:checked+.slider:before{transform:translateX(18px)}.tabs{display:flex;padding:3px;background:rgba(0,0,0,.13);border-radius:12px;margin-bottom:12px}.tab{flex:1;border:0;border-radius:9px;padding:9px;background:transparent;color:var(--muted);font-weight:650}.tab.active{background:var(--accent);color:var(--accentText)}.filter-panel{display:none}.filter-panel.active{display:block}.filter-grid{display:grid;gap:10px}.filter-grid label{font-size:13px;font-weight:650}.backdrop-actions{display:flex;gap:8px;margin:10px 0}.minor{flex:1;border:1px solid var(--line);border-radius:11px;padding:9px;background:rgba(0,0,0,.1);color:var(--text);font-weight:650}.backdrop-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:300px;overflow:auto;padding:2px}.backdrop-option{display:flex;align-items:center;gap:8px;padding:9px;border:1px solid var(--line);border-radius:11px;background:rgba(0,0,0,.08);font-size:13px}.backdrop-option input{width:18px;height:18px;margin:0;accent-color:var(--accent)}.footer{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 30%)}.save{display:block;width:min(652px,100%);margin:auto;border:0;border-radius:14px;padding:14px;background:var(--accent);color:var(--accentText);font-weight:750;font-size:16px}.save:disabled{opacity:.45}.note{font-size:12px;color:var(--muted);margin:8px 2px 0}.pill{display:inline-block;border-radius:999px;padding:4px 8px;background:rgba(64,201,139,.13);color:var(--good);font-size:12px;font-weight:700}.error{color:var(--bad)}
   </style>
 </head>
 <body>
@@ -41,10 +41,20 @@
     <div class="row"><label>Разрешённый фон</label><label class="switch"><input id="feature_backdrop_basis" type="checkbox" checked><span class="slider"></span></label></div>
     <div class="row"><label>Красивый номер</label><label class="switch"><input id="feature_beautiful_number" type="checkbox" checked><span class="slider"></span></label></div>
     <div class="row"><label>Монохром</label><label class="switch"><input id="feature_monochrome" type="checkbox" checked><span class="slider"></span></label></div>
-    <div class="row"><label>Улучшения Black / Onyx</label><label class="switch"><input id="feature_dark_upgrades" type="checkbox" checked><span class="slider"></span></label></div>
     <div class="row"><label>Ежедневный отчёт<span class="sub">По московскому времени</span></label><label class="switch"><input id="feature_daily_report" type="checkbox" checked><span class="slider"></span></label></div>
     <label class="sub" for="daily_report_hour">Час отчёта</label>
     <input id="daily_report_hour" type="number" min="0" max="23" value="21">
+  </section>
+
+  <section class="card">
+    <h2>Улучшения внутри Telegram</h2>
+    <div class="row"><label>Выбранные цвета фона<span class="sub">Уведомлять, если выпал один из отмеченных цветов</span></label><label class="switch"><input id="feature_dark_upgrades" type="checkbox" checked><span class="slider"></span></label></div>
+    <input id="backdrop_search" type="search" placeholder="Найти цвет">
+    <div class="backdrop-actions"><button id="backdrops_all" class="minor" type="button">Выбрать все</button><button id="backdrops_none" class="minor" type="button">Очистить</button></div>
+    <div id="upgrade_backdrops" class="backdrop-grid"></div>
+    <div class="row"><label>Дорогие коллекции<span class="sub">Срабатывает при любом фоне</span></label><label class="switch"><input id="feature_valuable_upgrades" type="checkbox" checked><span class="slider"></span></label></div>
+    <label class="sub" for="upgrade_min_floor">Минимальный floor коллекции</label>
+    <div class="price"><input id="upgrade_min_floor" inputmode="decimal" value="10"><span class="unit">TON</span></div>
   </section>
 
   <section class="card">
@@ -69,37 +79,65 @@
 <script>
   const tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { tg.ready(); tg.expand(); }
+  const BACKDROPS = [
+    'Black','Onyx Black','Gunmetal','Battleship Grey','Feldgrau','Steel Grey','Roman Silver','Platinum','Ivory White','Desert Sand',
+    'Cappuccino','Seal Brown','Chocolate','Chestnut','Rosewood','Burgundy','Carmine','Fire Engine','Tomato','Burnt Sienna','Copper',
+    'Carrot Juice','Persimmon','Orange','Caramel','Old Gold','Satin Gold','Pure Gold','Amber','Mustard','Light Olive','Khaki Green',
+    'Lemongrass','Pistachio','Camo Green','Ranger Green','Rifle Green','Dark Green','Hunter Green','Malachite','Shamrock Green','Mint Green',
+    'Emerald','Pacific Green','Jade Green','Pine Green','Gunship Green','Tactical Pine','Deep Cyan','Turquoise','Aquamarine','Pacific Cyan',
+    'Moonstone','Silver Blue','Indigo Dye','Midnight Blue','Marine Blue','French Blue','Sapphire','Sky Blue','Azure Blue','Celtic Blue',
+    'Navy Blue','Cobalt Blue','Neon Blue','Cyberpunk','Electric Indigo','Lavender','Grape','English Violet','French Violet','Electric Purple',
+    'Purple','Dark Lilac','Fandango','Mexican Pink','Raspberry','Mystic Pearl','Strawberry','Coral Red'
+  ];
+  let backdropSelection = new Set(['Black','Onyx Black']);
   const dirty = new Set();
   const stateIds = [
     'source_tonnel','source_portals','source_mrkt','feature_collection_basis',
     'feature_model_basis','feature_backdrop_basis','feature_beautiful_number',
-    'feature_monochrome','feature_dark_upgrades','feature_daily_report',
+    'feature_monochrome','feature_dark_upgrades','feature_valuable_upgrades','feature_daily_report',
     'daily_report_hour','max_lot_currency','min_floor_currency',
+    'upgrade_min_floor',
     'collections_allow','collections_deny','models_allow','models_deny',
     'backdrops_allow','backdrops_deny'
   ];
   const save = document.getElementById('save');
   function mark(group){ dirty.add(group); save.disabled=false; }
   document.querySelectorAll('input,select,textarea').forEach(el => {
+    if(el.id==='backdrop_search')return;
     el.addEventListener('change', () => mark(el.id.includes('_allow')||el.id.includes('_deny') ? 'filters' : el.id));
-    if (el.tagName==='TEXTAREA' || el.id==='max_lot' || el.id==='min_floor') el.addEventListener('input', () => mark(el.id.includes('_allow')||el.id.includes('_deny') ? 'filters' : el.id));
+    if (el.tagName==='TEXTAREA' || ['max_lot','min_floor','upgrade_min_floor'].includes(el.id)) el.addEventListener('input', () => mark(el.id.includes('_allow')||el.id.includes('_deny') ? 'filters' : el.id));
   });
   document.querySelectorAll('.tab').forEach(button => button.onclick=()=>{
     document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===button));
     document.querySelectorAll('.filter-panel').forEach(x=>x.classList.toggle('active',x.dataset.panel===button.dataset.mode));
   });
   function lines(id){return [...new Set(document.getElementById(id).value.split('\n').map(x=>x.trim()).filter(Boolean))];}
-  function snapshot(){const out={};stateIds.forEach(id=>{const e=document.getElementById(id);out[id]=e.type==='checkbox'?e.checked:e.value});return out;}
-  function restore(raw){try{const data=JSON.parse(raw||'{}');stateIds.forEach(id=>{if(!(id in data))return;const e=document.getElementById(id);if(e.type==='checkbox')e.checked=!!data[id];else e.value=data[id]});}catch(_){}}
+  function renderBackdrops(){
+    const query=document.getElementById('backdrop_search').value.trim().toLocaleLowerCase();
+    const root=document.getElementById('upgrade_backdrops');root.textContent='';
+    BACKDROPS.filter(name=>name.toLocaleLowerCase().includes(query)).forEach(name=>{
+      const label=document.createElement('label');label.className='backdrop-option';
+      const input=document.createElement('input');input.type='checkbox';input.checked=backdropSelection.has(name);
+      input.addEventListener('change',()=>{input.checked?backdropSelection.add(name):backdropSelection.delete(name);mark('upgrade_backdrops')});
+      label.append(input,document.createTextNode(name));root.append(label);
+    });
+  }
+  function snapshot(){const out={};stateIds.forEach(id=>{const e=document.getElementById(id);out[id]=e.type==='checkbox'?e.checked:e.value});out.upgrade_backdrops=[...backdropSelection];return out;}
+  function restore(raw){try{const data=JSON.parse(raw||'{}');stateIds.forEach(id=>{if(!(id in data))return;const e=document.getElementById(id);if(e.type==='checkbox')e.checked=!!data[id];else e.value=data[id]});if(Array.isArray(data.upgrade_backdrops))backdropSelection=new Set(data.upgrade_backdrops.filter(x=>BACKDROPS.includes(x)));renderBackdrops();}catch(_){}}
+  document.getElementById('backdrop_search').addEventListener('input',renderBackdrops);
+  document.getElementById('backdrops_all').onclick=()=>{backdropSelection=new Set(BACKDROPS);renderBackdrops();mark('upgrade_backdrops')};
+  document.getElementById('backdrops_none').onclick=()=>{backdropSelection.clear();renderBackdrops();mark('upgrade_backdrops')};
+  renderBackdrops();
   if(tg && tg.CloudStorage) tg.CloudStorage.getItem('giftwatch_form_v1',(err,value)=>{if(!err&&value)restore(value)});
   save.onclick=()=>{
     const settings={prices:{},sources:{},features:{},numbers:{}};
-    for(const name of ['max_lot','min_floor']) if(dirty.has(name)||dirty.has(name+'_currency')){
+    for(const name of ['max_lot','min_floor','upgrade_min_floor']) if(dirty.has(name)||dirty.has(name+'_currency')){
       const value=document.getElementById(name).value.trim();
-      if(value)settings.prices[name]={value,currency:document.getElementById(name+'_currency').value};
+      if(value)settings.prices[name]={value,currency:name==='upgrade_min_floor'?'ton':document.getElementById(name+'_currency').value};
     }
     for(const name of ['tonnel','portals','mrkt']) if(dirty.has('source_'+name))settings.sources[name]=document.getElementById('source_'+name).checked;
-    for(const name of ['collection_basis','model_basis','backdrop_basis','beautiful_number','monochrome','dark_upgrades','daily_report']) if(dirty.has('feature_'+name))settings.features[name]=document.getElementById('feature_'+name).checked;
+    for(const name of ['collection_basis','model_basis','backdrop_basis','beautiful_number','monochrome','dark_upgrades','valuable_upgrades','daily_report']) if(dirty.has('feature_'+name))settings.features[name]=document.getElementById('feature_'+name).checked;
+    if(dirty.has('upgrade_backdrops'))settings.upgrade_backdrops=[...backdropSelection];
     if(dirty.has('daily_report_hour'))settings.numbers.daily_report_hour=Number(document.getElementById('daily_report_hour').value);
     if(dirty.has('filters'))settings.filters={};
     if(dirty.has('filters'))for(const scope of ['collections','models','backdrops'])settings.filters[scope]={allow:lines(scope+'_allow'),deny:lines(scope+'_deny')};

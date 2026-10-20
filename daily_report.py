@@ -71,7 +71,7 @@ def build_report(db, chat_id, *, now=None):
         "",
         f"Подходящих офферов: <b>{signals}</b>",
         f"Из них отмечены проданными: <b>{sold}</b>",
-        f"Улучшений Black / Onyx: <b>{upgrades}</b>",
+        f"Улучшений Telegram: <b>{upgrades}</b>",
         f"Расчётная прибыль всех сигналов: <b>{potential:.0f} ₽</b>",
         "",
         f"<b>Площадки:</b> {_top(market_counts)}",

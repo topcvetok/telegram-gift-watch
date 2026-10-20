@@ -1,4 +1,4 @@
-"""Watch newly upgraded Telegram gifts for Black and Onyx Black backdrops."""
+"""Watch newly upgraded Telegram gifts using per-user alert rules."""
 
 import argparse
 import concurrent.futures
@@ -16,7 +16,15 @@ from curl_cffi import requests
 from PIL import Image
 
 from bot import ROOT, telegram
-from runtime_settings import activate_settings, active_profiles, feature_enabled, item_allowed
+from runtime_settings import (
+    DEFAULT_UPGRADE_BACKDROPS,
+    activate_settings,
+    active_profiles,
+    feature_enabled,
+    item_allowed,
+    normalize_filter_value,
+)
+from tonnel_watch import decimal, eligible, load_collection_book
 
 
 CATALOG_URL = "https://api.changes.tg/gifts"
@@ -255,32 +263,22 @@ def scan_collection(name, start, max_batch):
     for number in range(current + 1, current + max(1, int(max_batch)) + 1):
         if not gift_exists(name, number):
             break
-        image_bytes = gift_image(name, number)
-        backdrop = classify_backdrop(image_bytes)
-        details = {}
-        if backdrop is not None or image_bytes is None:
-            details = telegram_details(name, number)
-        if image_bytes is None and not details:
+        details = telegram_details(name, number)
+        backdrop = str(details.get("backdrop") or "").strip()
+        # Do not advance the head until Telegram exposes the attributes. This
+        # lets the next cycle retry a gift whose public page is still updating.
+        if not details or not backdrop:
             break
         current = number
-        reported = details.get("backdrop")
-        if backdrop is None and reported:
-            backdrop = next(
-                (target for target in TARGET_EDGES if reported.casefold() == target.casefold()),
-                None,
-            )
-        if backdrop:
-            if reported and reported.casefold() != backdrop.casefold():
-                continue
-            candidates.append({
-                "collection": name,
-                "number": number,
-                "backdrop": backdrop,
-                "model": details.get("model"),
-                "symbol": details.get("symbol"),
-                "owner": details.get("owner"),
-                "owner_username": details.get("owner_username"),
-            })
+        candidates.append({
+            "collection": name,
+            "number": number,
+            "backdrop": backdrop,
+            "model": details.get("model"),
+            "symbol": details.get("symbol"),
+            "owner": details.get("owner"),
+            "owner_username": details.get("owner_username"),
+        })
     return name, current, candidates
 
 
@@ -302,9 +300,14 @@ def format_owner(candidate):
     return "<b>ник скрыт</b>"
 
 
-def format_alert(candidate):
+def ton_text(value):
+    text = format(decimal(value), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def format_alert(candidate, reasons=None):
     lines = [
-        "🖤 <b>НОВОЕ УЛУЧШЕНИЕ В TELEGRAM</b>",
+        "🎨 <b>НОВОЕ УЛУЧШЕНИЕ В TELEGRAM</b>",
         "",
         f"🎁 <b>{html.escape(candidate['collection'])} #{int(candidate['number'])}</b>",
         f"👤 Улучшил: {format_owner(candidate)}",
@@ -314,8 +317,66 @@ def format_alert(candidate):
         lines.append(f"🧩 Модель: {html.escape(candidate['model'])}")
     if candidate.get("symbol"):
         lines.append(f"🔹 Символ: {html.escape(candidate['symbol'])}")
+    if reasons:
+        lines.extend(("", "<b>Основание:</b>", *reasons))
     lines.extend(("", "Подарок только что улучшен внутри Telegram."))
     return "\n".join(lines)
+
+
+def collection_floor_ton(db, collection, config):
+    prices = []
+    for item in load_collection_book(db, collection, config):
+        try:
+            if eligible(item):
+                prices.append(decimal(item.get("price"), "цена"))
+        except (TypeError, ValueError):
+            continue
+    return min(prices) if prices else None
+
+
+def allowed_upgrade(candidate, config, *, include_backdrop):
+    if include_backdrop:
+        filtered_config = config
+    else:
+        filtered_config = dict(config)
+        filters = {
+            scope: dict(groups)
+            for scope, groups in (config.get("filter_lists") or {}).items()
+        }
+        filters["backdrops"] = {"allow": [], "deny": []}
+        filtered_config["filter_lists"] = filters
+    return item_allowed({
+        "name": candidate.get("collection"),
+        "model": candidate.get("model"),
+        "backdrop": candidate.get("backdrop"),
+    }, filtered_config)
+
+
+def candidate_reasons(candidate, user_config):
+    reasons = []
+    selected = user_config.get("upgrade_backdrops", DEFAULT_UPGRADE_BACKDROPS)
+    selected = {normalize_filter_value(value) for value in selected}
+    backdrop = normalize_filter_value(candidate.get("backdrop"))
+    if (
+        feature_enabled(user_config, "dark_upgrades")
+        and backdrop in selected
+        and allowed_upgrade(candidate, user_config, include_backdrop=True)
+    ):
+        reasons.append(f"🎨 Выбранный фон: <b>{html.escape(candidate['backdrop'])}</b>")
+
+    floor = candidate.get("collection_floor_ton")
+    threshold = decimal(user_config.get("upgrade_min_floor_ton", 10))
+    if (
+        floor is not None
+        and feature_enabled(user_config, "valuable_upgrades")
+        and decimal(floor) >= threshold
+        and allowed_upgrade(candidate, user_config, include_backdrop=False)
+    ):
+        reasons.append(
+            f"💎 Floor коллекции в Tonnel: <b>{ton_text(floor)} TON</b> "
+            f"≥ {ton_text(threshold)} TON"
+        )
+    return reasons
 
 
 def send_candidate(candidate, config, secrets, db, send=True):
@@ -323,13 +384,8 @@ def send_candidate(candidate, config, secrets, db, send=True):
     link = gift_link(candidate)
     gift_id = f"{telegram_slug(candidate['collection'])}-{int(candidate['number'])}"
     for chat_id, user_config in active_profiles(config):
-        if not feature_enabled(user_config, "dark_upgrades"):
-            continue
-        if not item_allowed({
-            "name": candidate.get("collection"),
-            "model": candidate.get("model"),
-            "backdrop": candidate.get("backdrop"),
-        }, user_config):
+        reasons = candidate_reasons(candidate, user_config)
+        if not reasons:
             continue
         recipient = str(chat_id if chat_id is not None else secrets["chat_id"])
         old = db.execute(
@@ -339,11 +395,11 @@ def send_candidate(candidate, config, secrets, db, send=True):
         if old:
             continue
         if not send:
-            print(format_alert(candidate) + "\n" + link + "\n", flush=True)
+            print(format_alert(candidate, reasons) + "\n" + link + "\n", flush=True)
             continue
         message_id = telegram(
             dict(secrets, chat_id=recipient),
-            format_alert(candidate),
+            format_alert(candidate, reasons),
             preview_url=link,
             button_url=link,
             button_text="Открыть подарок",
@@ -386,7 +442,18 @@ def run_cycle(config, secrets, db, send=True):
                 (current, time.time(), name),
             )
             db.commit()
+            floor = None
+            if candidates:
+                try:
+                    floor = collection_floor_ton(db, name, config)
+                except (RuntimeError, ValueError) as exc:
+                    print(
+                        f"Floor коллекции улучшения {name}: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
             for candidate in candidates:
+                candidate["collection_floor_ton"] = floor
                 try:
                     delivered += send_candidate(candidate, config, secrets, db, send)
                 except RuntimeError as exc:

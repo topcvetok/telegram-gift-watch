@@ -1,11 +1,13 @@
 """Persistent user-adjustable monitor thresholds."""
 
+import json
 from decimal import Decimal, InvalidOperation
 
 
 SETTING_LABELS = {
     "max_lot_rub": "максимальная стоимость",
     "min_floor_rub": "минимальный floor",
+    "upgrade_min_floor_rub": "минимальный floor коллекции для улучшений",
 }
 
 CURRENCIES = {"rub", "ton"}
@@ -20,9 +22,30 @@ FEATURE_LABELS = {
     "backdrop_basis": "Цвет фона",
     "beautiful_number": "Красивый номер",
     "monochrome": "Монохром",
-    "dark_upgrades": "Улучшения Black / Onyx Black",
+    "dark_upgrades": "Улучшения выбранных фонов",
+    "valuable_upgrades": "Улучшения дорогих коллекций",
     "daily_report": "Ежедневный отчёт",
 }
+
+UPGRADE_BACKDROP_NAMES = (
+    "Black", "Onyx Black", "Gunmetal", "Battleship Grey", "Feldgrau",
+    "Steel Grey", "Roman Silver", "Platinum", "Ivory White", "Desert Sand",
+    "Cappuccino", "Seal Brown", "Chocolate", "Chestnut", "Rosewood",
+    "Burgundy", "Carmine", "Fire Engine", "Tomato", "Burnt Sienna", "Copper",
+    "Carrot Juice", "Persimmon", "Orange", "Caramel", "Old Gold", "Satin Gold",
+    "Pure Gold", "Amber", "Mustard", "Light Olive", "Khaki Green",
+    "Lemongrass", "Pistachio", "Camo Green", "Ranger Green", "Rifle Green",
+    "Dark Green", "Hunter Green", "Malachite", "Shamrock Green", "Mint Green",
+    "Emerald", "Pacific Green", "Jade Green", "Pine Green", "Gunship Green",
+    "Tactical Pine", "Deep Cyan", "Turquoise", "Aquamarine", "Pacific Cyan",
+    "Moonstone", "Silver Blue", "Indigo Dye", "Midnight Blue", "Marine Blue",
+    "French Blue", "Sapphire", "Sky Blue", "Azure Blue", "Celtic Blue",
+    "Navy Blue", "Cobalt Blue", "Neon Blue", "Cyberpunk", "Electric Indigo",
+    "Lavender", "Grape", "English Violet", "French Violet", "Electric Purple",
+    "Purple", "Dark Lilac", "Fandango", "Mexican Pink", "Raspberry",
+    "Mystic Pearl", "Strawberry", "Coral Red",
+)
+DEFAULT_UPGRADE_BACKDROPS = ("Black", "Onyx Black")
 NUMBER_SETTING_LABELS = {
     "beautiful_number_max_distinct_digits": "максимум разных цифр в номере",
     "monochrome_min_score": "минимальное совпадение монохрома",
@@ -136,6 +159,7 @@ def effective_config(config, db, chat_id=None):
         + tuple(f"{source}_enabled" for source in SOURCE_LABELS)
         + tuple(f"{feature}_enabled" for feature in FEATURE_LABELS)
         + tuple(NUMBER_SETTING_LABELS)
+        + ("upgrade_backdrops",)
     )
     rows = db.execute(
         f"SELECT key, value FROM runtime_settings_by_chat "
@@ -166,6 +190,17 @@ def effective_config(config, db, chat_id=None):
     for key, label in NUMBER_SETTING_LABELS.items():
         if key in stored:
             result[key] = _integer_setting(key, stored[key], label)
+    if "upgrade_backdrops" in stored:
+        try:
+            values = json.loads(stored["upgrade_backdrops"])
+            result["upgrade_backdrops"] = canonical_upgrade_backdrops(values)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            values = list(DEFAULT_UPGRADE_BACKDROPS)
+            result["upgrade_backdrops"] = values
+    else:
+        result["upgrade_backdrops"] = canonical_upgrade_backdrops(
+            result.get("upgrade_backdrops", DEFAULT_UPGRADE_BACKDROPS)
+        )
     result["filter_lists"] = filter_lists(db, chat_id)
     return result
 
@@ -326,6 +361,34 @@ def set_number_setting(db, key, value, *, chat_id=None):
     )
     db.commit()
     return amount
+
+
+def canonical_upgrade_backdrops(values):
+    if not isinstance(values, (list, tuple)):
+        raise ValueError("Цвета улучшений должны быть списком")
+    canonical = {normalize_filter_value(name): name for name in UPGRADE_BACKDROP_NAMES}
+    result = []
+    seen = set()
+    for value in values:
+        normalized = normalize_filter_value(value)
+        if normalized not in canonical:
+            raise ValueError(f"Неизвестный цвет фона: {value}")
+        if normalized not in seen:
+            seen.add(normalized)
+            result.append(canonical[normalized])
+    return result
+
+
+def set_upgrade_backdrops(db, values, *, chat_id=None):
+    selected = canonical_upgrade_backdrops(values)
+    ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
+    db.execute(
+        "INSERT OR REPLACE INTO runtime_settings_by_chat "
+        "(chat_id, key, value, updated) VALUES (?, 'upgrade_backdrops', ?, unixepoch())",
+        (_profile(chat_id), json.dumps(selected, ensure_ascii=False)),
+    )
+    db.commit()
+    return selected
 
 
 def authorize_chat(db, chat_id):

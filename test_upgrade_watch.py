@@ -3,6 +3,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -71,24 +72,73 @@ class UpgradeWatchTests(unittest.TestCase):
         page = '<tr><th>Owner</th><td><span dir="auto">Ulyana</span></td></tr>'
         self.assertEqual(watch.parse_telegram_details(page), {"owner": "Ulyana"})
 
-    def test_scan_advances_head_and_keeps_only_target_backdrops(self):
+    def test_scan_advances_head_and_keeps_every_reported_backdrop(self):
         existence = {11: True, 12: True, 13: False}
-        images = {
-            11: jpeg((14, 15, 15)),
-            12: jpeg((80, 120, 180)),
-        }
         with patch.object(watch, "gift_exists", side_effect=lambda name, n: existence[n]), \
-                patch.object(watch, "gift_image", side_effect=lambda name, n: images[n]), \
-                patch.object(watch, "telegram_details", return_value={
-                    "model": "Dark Model", "backdrop": "Black", "symbol": "Star",
-                    "owner": "Dark Collector", "owner_username": "darkcollector",
-                }):
+                patch.object(watch, "telegram_details", side_effect=[
+                    {"model": "Dark Model", "backdrop": "Black", "symbol": "Star",
+                     "owner": "Dark Collector", "owner_username": "darkcollector"},
+                    {"model": "Blue Model", "backdrop": "Azure Blue", "symbol": "Moon"},
+                ]):
             name, head, candidates = watch.scan_collection("Test Gift", 10, 20)
         self.assertEqual((name, head), ("Test Gift", 12))
-        self.assertEqual(len(candidates), 1)
+        self.assertEqual(len(candidates), 2)
         self.assertEqual(candidates[0]["number"], 11)
         self.assertEqual(candidates[0]["backdrop"], "Black")
         self.assertEqual(candidates[0]["owner_username"], "darkcollector")
+        self.assertEqual(candidates[1]["backdrop"], "Azure Blue")
+
+    def test_selected_backdrop_and_collection_floor_are_independent(self):
+        candidate = {
+            "collection": "Plush Pepe",
+            "number": 123,
+            "backdrop": "Azure Blue",
+            "model": "Pumpkin",
+            "collection_floor_ton": Decimal("12"),
+        }
+        color_only = {
+            "dark_upgrades_enabled": True,
+            "valuable_upgrades_enabled": False,
+            "upgrade_backdrops": ["Azure Blue"],
+        }
+        floor_only = {
+            "dark_upgrades_enabled": False,
+            "valuable_upgrades_enabled": True,
+            "upgrade_min_floor_ton": Decimal("10"),
+            "upgrade_backdrops": [],
+        }
+        self.assertEqual(len(watch.candidate_reasons(candidate, color_only)), 1)
+        self.assertIn("Выбранный фон", watch.candidate_reasons(candidate, color_only)[0])
+        self.assertEqual(len(watch.candidate_reasons(candidate, floor_only)), 1)
+        self.assertIn("12 TON", watch.candidate_reasons(candidate, floor_only)[0])
+
+    def test_below_floor_and_unselected_backdrop_do_not_trigger(self):
+        candidate = {
+            "collection": "Plush Pepe", "number": 123,
+            "backdrop": "Azure Blue", "collection_floor_ton": Decimal("9.99"),
+        }
+        config = {
+            "dark_upgrades_enabled": True,
+            "valuable_upgrades_enabled": True,
+            "upgrade_backdrops": ["Black"],
+            "upgrade_min_floor_ton": Decimal("10"),
+        }
+        self.assertEqual(watch.candidate_reasons(candidate, config), [])
+
+    def test_collection_floor_uses_lowest_active_tonnel_listing(self):
+        book = [
+            {"status": "forsale", "asset": "TON", "auction": False,
+             "dutchAuctionData": None, "premarketData": None, "underLoan": False,
+             "gift_id": 1, "price": "12.5"},
+            {"status": "forsale", "asset": "TON", "auction": False,
+             "dutchAuctionData": None, "premarketData": None, "underLoan": False,
+             "gift_id": 2, "price": "11.75"},
+        ]
+        with sqlite3.connect(":memory:") as db, \
+                patch.object(watch, "load_collection_book", return_value=book):
+            self.assertEqual(
+                watch.collection_floor_ton(db, "Plush Pepe", {}), Decimal("11.75")
+            )
 
     def test_alert_is_independent_per_chat_and_deduplicated(self):
         candidate = {

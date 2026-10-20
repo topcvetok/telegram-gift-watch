@@ -20,6 +20,7 @@ from runtime_settings import (
     set_number_setting,
     set_setting,
     set_source_enabled,
+    set_upgrade_backdrops,
 )
 
 
@@ -162,12 +163,19 @@ def apply_web_app_payload(data, db, chat_id=None):
     if not isinstance(settings, dict):
         raise ValueError("Mini App не передал настройки")
     prices = settings.get("prices") or {}
-    for name, key in (("max_lot", "max_lot_rub"), ("min_floor", "min_floor_rub")):
+    for name, key in (
+        ("max_lot", "max_lot_rub"),
+        ("min_floor", "min_floor_rub"),
+        ("upgrade_min_floor", "upgrade_min_floor_rub"),
+    ):
         entry = prices.get(name)
         if isinstance(entry, dict):
             set_setting(
                 db, key, entry.get("value"),
-                currency=str(entry.get("currency") or "rub").casefold(),
+                currency=(
+                    "ton" if name == "upgrade_min_floor"
+                    else str(entry.get("currency") or "rub").casefold()
+                ),
                 chat_id=chat_id,
             )
     for source, enabled in (settings.get("sources") or {}).items():
@@ -179,6 +187,8 @@ def apply_web_app_payload(data, db, chat_id=None):
     for key, value in (settings.get("numbers") or {}).items():
         if key in NUMBER_SETTING_LABELS:
             set_number_setting(db, key, value, chat_id=chat_id)
+    if "upgrade_backdrops" in settings:
+        set_upgrade_backdrops(db, settings["upgrade_backdrops"], chat_id=chat_id)
     if "filters" in settings:
         replace_filters(db, settings.get("filters") or {}, chat_id=chat_id)
     return True

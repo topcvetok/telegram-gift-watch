@@ -17,6 +17,7 @@ from runtime_settings import (
     set_number_setting,
     set_setting,
     set_source_enabled,
+    set_upgrade_backdrops,
     source_enabled,
 )
 
@@ -70,6 +71,7 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertTrue(feature_enabled(current, "beautiful_number"))
         self.assertTrue(feature_enabled(current, "monochrome"))
         self.assertTrue(feature_enabled(current, "dark_upgrades"))
+        self.assertTrue(feature_enabled(current, "valuable_upgrades"))
         set_feature_enabled(self.db, "monochrome", False)
         set_feature_enabled(self.db, "collection_basis", False)
         set_number_setting(self.db, "beautiful_number_max_distinct_digits", 2)
@@ -81,6 +83,22 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(current["beautiful_number_max_distinct_digits"], 2)
         self.assertEqual(current["monochrome_min_score"], 85)
         self.assertEqual(current["monochrome_max_floor_premium_percent"], 15)
+
+    def test_upgrade_threshold_and_backdrops_are_persistent_per_user(self):
+        activate_settings(self.db, "owner")
+        authorize_chat(self.db, "guest")
+        set_setting(
+            self.db, "upgrade_min_floor_rub", "10.5",
+            currency="ton", chat_id="owner",
+        )
+        set_upgrade_backdrops(
+            self.db, ["Azure Blue", "Black"], chat_id="owner"
+        )
+        set_upgrade_backdrops(self.db, ["Coral Red"], chat_id="guest")
+        profiles = dict(active_profiles(self.config))
+        self.assertEqual(profiles["owner"]["upgrade_min_floor_ton"], Decimal("10.5"))
+        self.assertEqual(profiles["owner"]["upgrade_backdrops"], ["Azure Blue", "Black"])
+        self.assertEqual(profiles["guest"]["upgrade_backdrops"], ["Coral Red"])
 
     def test_special_threshold_ranges_are_validated(self):
         with self.assertRaisesRegex(ValueError, "от 1 до 10"):
