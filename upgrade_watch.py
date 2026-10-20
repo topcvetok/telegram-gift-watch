@@ -139,18 +139,47 @@ def classify_backdrop(image_bytes):
 
 
 def parse_telegram_details(page):
+    page = str(page or "")
+    result = {}
     match = re.search(
         r'<meta\s+name="twitter:description"\s+content="([^"]*)"',
-        str(page or ""),
+        page,
         re.IGNORECASE,
     )
-    if not match:
-        return {}
-    result = {}
-    for line in html.unescape(match.group(1)).splitlines():
-        key, separator, value = line.partition(":")
-        if separator and key.strip() in {"Model", "Backdrop", "Symbol"}:
-            result[key.strip().casefold()] = value.strip()
+    if match:
+        for line in html.unescape(match.group(1)).splitlines():
+            key, separator, value = line.partition(":")
+            if separator and key.strip() in {"Model", "Backdrop", "Symbol"}:
+                result[key.strip().casefold()] = value.strip()
+
+    owner_match = re.search(
+        r"<tr>\s*<th>\s*Owner\s*</th>\s*<td>(.*?)</td>\s*</tr>",
+        page,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not owner_match:
+        return result
+    owner_html = owner_match.group(1)
+    owner = re.sub(r"<[^>]+>", "", owner_html)
+    owner = " ".join(html.unescape(owner).split())
+    if owner:
+        result["owner"] = owner
+    username_match = re.search(
+        r'href=["\']https?://t\.me/([A-Za-z0-9_]{4,32})(?:[/?#][^"\']*)?["\']',
+        owner_html,
+        re.IGNORECASE,
+    )
+    username = username_match.group(1) if username_match else None
+    if not username_match and owner:
+        owner_username_match = re.fullmatch(
+            r"(?:@([A-Za-z0-9_]{4,32})|([A-Za-z0-9_]{4,32})\.t\.me)",
+            owner,
+            re.IGNORECASE,
+        )
+        if owner_username_match:
+            username = owner_username_match.group(1) or owner_username_match.group(2)
+    if username:
+        result["owner_username"] = username
     return result
 
 
@@ -249,6 +278,8 @@ def scan_collection(name, start, max_batch):
                 "backdrop": backdrop,
                 "model": details.get("model"),
                 "symbol": details.get("symbol"),
+                "owner": details.get("owner"),
+                "owner_username": details.get("owner_username"),
             })
     return name, current, candidates
 
@@ -260,11 +291,23 @@ def gift_link(candidate):
     )
 
 
+def format_owner(candidate):
+    username = str(candidate.get("owner_username") or "").strip().lstrip("@")
+    if re.fullmatch(r"[A-Za-z0-9_]{4,32}", username):
+        escaped = html.escape(username)
+        return f'<a href="https://t.me/{escaped}">@{escaped}</a>'
+    owner = str(candidate.get("owner") or "").strip()
+    if owner and not re.fullmatch(r"[UE]Q[A-Za-z0-9_-]{40,60}", owner):
+        return f"<b>{html.escape(owner)}</b>"
+    return "<b>ник скрыт</b>"
+
+
 def format_alert(candidate):
     lines = [
         "🖤 <b>НОВОЕ УЛУЧШЕНИЕ В TELEGRAM</b>",
         "",
         f"🎁 <b>{html.escape(candidate['collection'])} #{int(candidate['number'])}</b>",
+        f"👤 Улучшил: {format_owner(candidate)}",
         f"🎨 Фон: <b>{html.escape(candidate['backdrop'])}</b>",
     ]
     if candidate.get("model"):

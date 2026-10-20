@@ -46,12 +46,30 @@ class UpgradeWatchTests(unittest.TestCase):
         page = (
             '<meta name="twitter:description" content="Model: Pumpkin&#10;'
             'Backdrop: Onyx Black&#10;Symbol: Illuminati&#10;&#10;">'
+            '<tr><th>Owner</th><td><a href="https://t.me/darkcollector">'
+            '<span dir="auto">Dark Collector</span></a></td></tr>'
         )
         self.assertEqual(watch.parse_telegram_details(page), {
             "model": "Pumpkin",
             "backdrop": "Onyx Black",
             "symbol": "Illuminati",
+            "owner": "Dark Collector",
+            "owner_username": "darkcollector",
         })
+
+    def test_telegram_owner_domain_is_converted_to_username(self):
+        page = (
+            '<tr><th>Owner</th><td><span class="tgme_gift_owner_address">'
+            'z5zzz.t.me</span></td></tr>'
+        )
+        self.assertEqual(watch.parse_telegram_details(page), {
+            "owner": "z5zzz.t.me",
+            "owner_username": "z5zzz",
+        })
+
+    def test_plain_owner_name_is_not_invented_as_a_username(self):
+        page = '<tr><th>Owner</th><td><span dir="auto">Ulyana</span></td></tr>'
+        self.assertEqual(watch.parse_telegram_details(page), {"owner": "Ulyana"})
 
     def test_scan_advances_head_and_keeps_only_target_backdrops(self):
         existence = {11: True, 12: True, 13: False}
@@ -63,12 +81,14 @@ class UpgradeWatchTests(unittest.TestCase):
                 patch.object(watch, "gift_image", side_effect=lambda name, n: images[n]), \
                 patch.object(watch, "telegram_details", return_value={
                     "model": "Dark Model", "backdrop": "Black", "symbol": "Star",
+                    "owner": "Dark Collector", "owner_username": "darkcollector",
                 }):
             name, head, candidates = watch.scan_collection("Test Gift", 10, 20)
         self.assertEqual((name, head), ("Test Gift", 12))
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["number"], 11)
         self.assertEqual(candidates[0]["backdrop"], "Black")
+        self.assertEqual(candidates[0]["owner_username"], "darkcollector")
 
     def test_alert_is_independent_per_chat_and_deduplicated(self):
         candidate = {
@@ -77,6 +97,8 @@ class UpgradeWatchTests(unittest.TestCase):
             "backdrop": "Onyx Black",
             "model": "Pumpkin",
             "symbol": "Illuminati",
+            "owner": "Dark Collector",
+            "owner_username": "darkcollector",
         }
         profiles = [
             ("owner", {"dark_upgrades_enabled": True}),
@@ -101,6 +123,20 @@ class UpgradeWatchTests(unittest.TestCase):
             call.kwargs["button_text"] == "Открыть подарок"
             for call in send.call_args_list
         ))
+        self.assertTrue(all(
+            '👤 Улучшил: <a href="https://t.me/darkcollector">@darkcollector</a>'
+            in call.args[1]
+            for call in send.call_args_list
+        ))
+
+    def test_hidden_wallet_owner_is_not_exposed_as_a_nickname(self):
+        candidate = {
+            "collection": "Test Gift",
+            "number": 1,
+            "backdrop": "Black",
+            "owner": "UQ" + "a" * 46,
+        }
+        self.assertIn("👤 Улучшил: <b>ник скрыт</b>", watch.format_alert(candidate))
 
 
 if __name__ == "__main__":
