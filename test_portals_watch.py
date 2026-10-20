@@ -90,6 +90,18 @@ class PortalsTests(unittest.TestCase):
         self.assertEqual(watch.stable_floor(item, stable, 5, 0.08), Decimal("12.02"))
         self.assertIsNone(watch.stable_floor(item, unstable, 3, 0.08))
 
+    def test_displayed_model_floor_uses_one_active_listing(self):
+        item = watch.portals_item(raw_gift())
+        book = [
+            item,
+            watch.portals_item(raw_gift("p2", "12.5")),
+            watch.portals_item(raw_gift("p3", "40")),
+        ]
+        self.assertEqual(
+            watch.comparable_model_floor(item, book, self.config),
+            Decimal("12.5"),
+        )
+
     def test_cross_market_snapshot_has_only_model_floors(self):
         db = sqlite3.connect(":memory:")
         item = watch.portals_item(raw_gift())
@@ -156,7 +168,7 @@ class PortalsTests(unittest.TestCase):
         text = watch.format_alert(item, result, self.config)
         self.assertIn("<b>оффер на Portals</b>", text)
         self.assertNotIn("РИСК", text)
-        self.assertIn("<b>Устойчивые floor:</b>", text)
+        self.assertIn("<b>Floor модели по площадкам:</b>", text)
         self.assertIn("<b>Tonnel</b>", text)
         self.assertIn("• модель: 11.500 TON", text)
         self.assertNotIn("• коллекция:", text)

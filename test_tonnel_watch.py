@@ -86,6 +86,24 @@ class TonnelScoringTests(unittest.TestCase):
         floor = [gift(i, p) for i, p in enumerate([3.57, 3.58, 3.90, 4.10, 5.00], 2)]
         self.assertIsNone(watch.score(gift(1, 2.50), floor, Decimal("124.42"), self.config))
 
+    def test_forced_model_book_is_loaded_above_offer_budget(self):
+        config = dict(self.config)
+        config.update({
+            "variant_cache_seconds": 20,
+            "variant_floor_limit": 10,
+            "variant_workers": 1,
+        })
+        expensive = gift(1, 100, model="Rare Model")
+        with sqlite3.connect(":memory:") as db, patch.object(
+            watch, "fetch_collection", return_value=[gift(2, 12, model="Rare Model")]
+        ) as fetch:
+            books = watch.load_variant_books(
+                db, "Chill Flame", [expensive], Decimal("100"), config, [1],
+                force_keys=[("model", "Rare Model")],
+            )
+        self.assertIn(("model", "Rare Model"), books)
+        self.assertEqual(fetch.call_args.args[3], {"model": "Rare Model"})
+
     def test_auction_and_premarket_fail(self):
         self.assertIsNone(watch.score(gift(1, 2.0, auction={"active": True}), self.floor, Decimal("124.42"), self.config))
         self.assertIsNone(watch.score(gift(1, 2.0, premarketData={"active": True}), self.floor, Decimal("124.42"), self.config))

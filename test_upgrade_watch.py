@@ -95,6 +95,7 @@ class UpgradeWatchTests(unittest.TestCase):
             "backdrop": "Azure Blue",
             "model": "Pumpkin",
             "collection_floor_ton": Decimal("12"),
+            "collection_floor_market": "MRKT",
         }
         color_only = {
             "dark_upgrades_enabled": True,
@@ -111,6 +112,7 @@ class UpgradeWatchTests(unittest.TestCase):
         self.assertIn("Выбранный фон", watch.candidate_reasons(candidate, color_only)[0])
         self.assertEqual(len(watch.candidate_reasons(candidate, floor_only)), 1)
         self.assertIn("12 TON", watch.candidate_reasons(candidate, floor_only)[0])
+        self.assertIn("MRKT", watch.candidate_reasons(candidate, floor_only)[0])
 
     def test_below_floor_and_unselected_backdrop_do_not_trigger(self):
         candidate = {
@@ -137,8 +139,27 @@ class UpgradeWatchTests(unittest.TestCase):
         with sqlite3.connect(":memory:") as db, \
                 patch.object(watch, "load_collection_book", return_value=book):
             self.assertEqual(
-                watch.collection_floor_ton(db, "Plush Pepe", {}), Decimal("11.75")
+                watch.collection_floor_ton(db, "Plush Pepe", {}, {}),
+                (Decimal("11.75"), "Tonnel"),
             )
+
+    def test_collection_floor_prefers_mrkt(self):
+        mrkt_book = [
+            {"status": "forsale", "asset": "TON", "auction": False,
+             "dutchAuctionData": None, "premarketData": None, "underLoan": False,
+             "gift_id": 1, "price": "9.5"},
+        ]
+        with sqlite3.connect(":memory:") as db, \
+                patch("mrkt_watch.cached_book", return_value=mrkt_book) as mrkt, \
+                patch.object(watch, "load_collection_book") as tonnel:
+            self.assertEqual(
+                watch.collection_floor_ton(
+                    db, "Plush Pepe", {}, {"mrkt_token": "token"}
+                ),
+                (Decimal("9.5"), "MRKT"),
+            )
+        mrkt.assert_called_once()
+        tonnel.assert_not_called()
 
     def test_alert_is_independent_per_chat_and_deduplicated(self):
         candidate = {

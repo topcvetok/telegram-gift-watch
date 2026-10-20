@@ -323,15 +323,39 @@ def format_alert(candidate, reasons=None):
     return "\n".join(lines)
 
 
-def collection_floor_ton(db, collection, config):
+def lowest_book_floor(book):
     prices = []
-    for item in load_collection_book(db, collection, config):
+    for item in book:
         try:
             if eligible(item):
                 prices.append(decimal(item.get("price"), "цена"))
         except (TypeError, ValueError):
             continue
     return min(prices) if prices else None
+
+
+def collection_floor_ton(db, collection, config, secrets=None):
+    """Prefer MRKT collection floor and fall back to Tonnel."""
+    token = str((secrets or {}).get("mrkt_token") or "").strip()
+    if token:
+        try:
+            from mrkt_watch import cached_book as mrkt_cached_book
+
+            floor = lowest_book_floor(mrkt_cached_book(
+                db, session(), token, collection=collection, config=config,
+            ))
+            if floor is not None:
+                return floor, "MRKT"
+        except (RuntimeError, ValueError) as exc:
+            print(
+                f"Floor коллекции улучшения {collection} в MRKT: {exc}; "
+                "использую Tonnel",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    floor = lowest_book_floor(load_collection_book(db, collection, config))
+    return floor, "Tonnel" if floor is not None else None
 
 
 def allowed_upgrade(candidate, config, *, include_backdrop):
@@ -372,8 +396,11 @@ def candidate_reasons(candidate, user_config):
         and decimal(floor) >= threshold
         and allowed_upgrade(candidate, user_config, include_backdrop=False)
     ):
+        floor_market = html.escape(str(
+            candidate.get("collection_floor_market") or "Tonnel"
+        ))
         reasons.append(
-            f"💎 Floor коллекции в Tonnel: <b>{ton_text(floor)} TON</b> "
+            f"💎 Floor коллекции в {floor_market}: <b>{ton_text(floor)} TON</b> "
             f"≥ {ton_text(threshold)} TON"
         )
     return reasons
@@ -443,9 +470,12 @@ def run_cycle(config, secrets, db, send=True):
             )
             db.commit()
             floor = None
+            floor_market = None
             if candidates:
                 try:
-                    floor = collection_floor_ton(db, name, config)
+                    floor, floor_market = collection_floor_ton(
+                        db, name, config, secrets
+                    )
                 except (RuntimeError, ValueError) as exc:
                     print(
                         f"Floor коллекции улучшения {name}: {exc}",
@@ -454,6 +484,7 @@ def run_cycle(config, secrets, db, send=True):
                     )
             for candidate in candidates:
                 candidate["collection_floor_ton"] = floor
+                candidate["collection_floor_market"] = floor_market
                 try:
                     delivered += send_candidate(candidate, config, secrets, db, send)
                 except RuntimeError as exc:

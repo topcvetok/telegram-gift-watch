@@ -120,7 +120,8 @@ def fetch_collection(name, sort, limit, attributes=None):
     return result
 
 
-def load_variant_books(db, collection, items, rate, config, query_budget):
+def load_variant_books(
+        db, collection, items, rate, config, query_budget, force_keys=None):
     db.execute(
         "CREATE TABLE IF NOT EXISTS tonnel_variant_books ("
         "scope TEXT, collection TEXT, trait TEXT, payload TEXT, checked REAL, "
@@ -130,6 +131,17 @@ def load_variant_books(db, collection, items, rate, config, query_budget):
     budget = threshold_ton(config, "max_lot", rate)
     keys = []
     seen = set()
+    for scope, trait in force_keys or []:
+        key = (scope, trait)
+        if (
+            scope in ("model", "backdrop")
+            and isinstance(trait, str)
+            and trait.strip()
+            and (scope != "backdrop" or allowed_backdrop(trait))
+            and key not in seen
+        ):
+            seen.add(key)
+            keys.append(key)
     for item in items:
         try:
             if not eligible(item) or decimal(item["price"]) > budget:

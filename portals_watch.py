@@ -341,6 +341,18 @@ def stable_floor(item, book, minimum, max_spread):
     return floor
 
 
+def lowest_floor(item, book):
+    """Return the cheapest active comparable listing without cluster requirements."""
+    prices = []
+    for other in book:
+        try:
+            if eligible(other) and str(other["gift_id"]) != str(item["gift_id"]):
+                prices.append(decimal(other["price"], "цена аналога"))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return min(prices) if prices else None
+
+
 def basis_book(db, session, token, item, result, config):
     scope = result.get("basis_scope", "collection")
     kwargs = {
@@ -363,13 +375,10 @@ def basis_book(db, session, token, item, result, config):
 
 
 def comparable_model_floor(item, model_book, config):
-    """Return the stable floor for the listing's exact model."""
+    """Return the direct floor for the listing's exact model."""
     if not item.get("model"):
         return None
-    return stable_floor(
-        item, model_book, config["variant_min_comparables"],
-        config["variant_floor_cluster_max_spread_fraction"],
-    )
+    return lowest_floor(item, model_book)
 
 
 def tonnel_model_floor(item, result, config, db):
@@ -379,7 +388,8 @@ def tonnel_model_floor(item, result, config, db):
     tonnel_config.setdefault("variant_workers", 1)
     model_item = dict(item, backdrop=None)
     model_books = load_variant_books(
-        db, item["name"], [model_item], result["rate"], tonnel_config, [1]
+        db, item["name"], [model_item], result["rate"], tonnel_config, [1],
+        force_keys=[("model", item.get("model"))],
     )
     model_book = model_books.get(("model", item.get("model")), [])
     return comparable_model_floor(item, model_book, config)

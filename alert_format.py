@@ -49,7 +49,7 @@ def format_market_alert(item, result, *, market, config=None):
         floor_lines.append(f"<b>{market_name}</b>")
         floor = entry.get("model_floor")
         if floor is None:
-            floor_lines.append("  • модель: нет устойчивых данных")
+            floor_lines.append("  • модель: нет активных лотов")
             continue
         difference = floor - price
         percent = difference / price * 100 if price > 0 else 0
@@ -58,7 +58,7 @@ def format_market_alert(item, result, *, market, config=None):
             f"({difference:+.3f} TON / {percent:+.1f}%)"
         )
     if not floor_lines:
-        floor_lines.append("Нет подтверждённого устойчивого floor")
+        floor_lines.append("Нет активных лотов этой модели")
 
     basis = escape(str(result.get("basis") or "вся коллекция"))
     model = escape(str(item.get("model") or "не указана"))
@@ -108,7 +108,7 @@ def format_market_alert(item, result, *, market, config=None):
         f"Модель: {model}",
         f"Фон: {backdrop}",
         "",
-        "<b>Устойчивые floor:</b>",
+        "<b>Floor модели по площадкам:</b>",
         *floor_lines,
         "",
         f"<b>Ликвидность:</b> {liquidity} (активность за 24 ч: {activity})",

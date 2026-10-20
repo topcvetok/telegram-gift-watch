@@ -41,6 +41,13 @@ class AlertFormatTests(unittest.TestCase):
         self.assertIn("Где выгоднее перепродать", text)
         self.assertIn("Portals", text)
 
+    def test_alert_labels_direct_model_floors_and_missing_listings(self):
+        self.result["market_floors"][1]["model_floor"] = None
+        text = format_market_alert(self.item, self.result, market="Tonnel")
+        self.assertIn("Floor модели по площадкам", text)
+        self.assertIn("нет активных лотов", text)
+        self.assertNotIn("нет устойчивых данных", text)
+
 
 if __name__ == "__main__":
     unittest.main()
