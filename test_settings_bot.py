@@ -166,7 +166,7 @@ class SettingsBotTests(unittest.TestCase):
             ).fetchone()
         )
 
-    def test_run_registers_no_chat_setting_commands(self):
+    def test_run_removes_all_commands_from_bot_menu(self):
         with (
             patch.object(settings_bot, "api") as telegram,
             patch.object(settings_bot.time, "monotonic", side_effect=[0, 2]),
@@ -174,10 +174,10 @@ class SettingsBotTests(unittest.TestCase):
         ):
             settings_bot.run(self.config, self.secrets, self.db, duration=1)
 
-        commands = telegram.call_args_list[0].args[2]["commands"]
+        self.assertEqual(telegram.call_args_list[0].args[1], "deleteMyCommands")
+        self.assertEqual(telegram.call_args_list[1].args[1], "setChatMenuButton")
         self.assertEqual(
-            [item["command"] for item in commands],
-            ["settings", "app", "join", "leave"],
+            telegram.call_args_list[1].args[2]["menu_button"], {"type": "default"}
         )
         cleanup.assert_called_once_with(self.secrets, self.db)
 

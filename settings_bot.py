@@ -248,15 +248,10 @@ def handle_update(update, secrets, config, db):
 
 
 def run(config, secrets, db, duration=3300):
-    api(secrets, "setMyCommands", {"commands": [
-        {"command": "settings", "description": "Открыть настройки Mini App"},
-        {"command": "app", "description": "Открыть настройки Mini App"},
-        {"command": "join", "description": "Войти по коду доступа"},
-        {"command": "leave", "description": "Отключить доступ"},
-    ]})
+    api(secrets, "deleteMyCommands")
     # Data-saving Mini Apps must be opened from a reply-keyboard Web App button.
-    # Keep the permanent menu on commands; /app sends the compatible launcher.
-    api(secrets, "setChatMenuButton", {"menu_button": {"type": "commands"}})
+    # Hide the command menu; manually entered /app sends the compatible launcher.
+    api(secrets, "setChatMenuButton", {"menu_button": {"type": "default"}})
     remove_legacy_settings_views(secrets, db)
     deadline = time.monotonic() + max(1, int(duration))
     offset = None
