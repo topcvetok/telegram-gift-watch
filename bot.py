@@ -142,7 +142,7 @@ def message(item, result, rule, complete):
 
 def telegram(
     secrets, text, *, preview_url=None, button_url=None,
-    button_text="Открыть оффер",
+    button_text="Открыть оффер", callback_text=None, callback_data=None,
 ):
     preview_options = {"is_disabled": True}
     if preview_url:
@@ -158,10 +158,13 @@ def telegram(
         "parse_mode": "HTML",
         "link_preview_options": preview_options,
     }
+    buttons = []
     if button_url:
-        payload["reply_markup"] = {
-            "inline_keyboard": [[{"text": button_text, "url": button_url}]]
-        }
+        buttons.append({"text": button_text, "url": button_url})
+    if callback_text and callback_data:
+        buttons.append({"text": callback_text, "callback_data": callback_data})
+    if buttons:
+        payload["reply_markup"] = {"inline_keyboard": [buttons]}
     result = request_json(
         f"https://api.telegram.org/bot{secrets['bot_token']}/sendMessage",
         payload)

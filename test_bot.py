@@ -111,6 +111,25 @@ class SignalTests(unittest.TestCase):
             "show_above_text": True,
         })
 
+    def test_telegram_places_callback_next_to_link_button(self):
+        with patch.object(bot, "request_json", return_value={
+            "ok": True, "result": {"message_id": 322}
+        }) as request:
+            bot.telegram(
+                {"bot_token": "1:test", "chat_id": "42"},
+                "upgrade",
+                button_url="https://t.me/nft/TestGift-1",
+                button_text="Открыть подарок",
+                callback_text="Скрыть",
+                callback_data="hide:message",
+            )
+        self.assertEqual(request.call_args.args[1]["reply_markup"], {
+            "inline_keyboard": [[
+                {"text": "Открыть подарок", "url": "https://t.me/nft/TestGift-1"},
+                {"text": "Скрыть", "callback_data": "hide:message"},
+            ]]
+        })
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -439,6 +439,8 @@ def send_candidate(candidate, config, secrets, db, send=True):
             preview_url=link,
             button_url=link,
             button_text="Открыть подарок",
+            callback_text="Скрыть",
+            callback_data="hide:message",
         )
         db.execute(
             "INSERT OR REPLACE INTO telegram_upgrade_alerts VALUES (?, ?, ?, ?)",

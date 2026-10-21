@@ -249,6 +249,14 @@ def handle_update(update, secrets, config, db):
         return
     chat_secrets = dict(secrets, chat_id=chat_id)
     callback_id = callback.get("id")
+    callback_data = str(callback.get("data") or "")
+    if callback_data == "hide:message":
+        if callback_id:
+            api(chat_secrets, "answerCallbackQuery", {
+                "callback_query_id": callback_id,
+            })
+        delete_message(chat_secrets, callback_message.get("message_id"))
+        return
     if callback_id:
         api(chat_secrets, "answerCallbackQuery", {
             "callback_query_id": callback_id,

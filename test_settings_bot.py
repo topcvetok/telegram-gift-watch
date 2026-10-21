@@ -132,6 +132,23 @@ class SettingsBotTests(unittest.TestCase):
             "Настройки перенесены в Mini App",
         )
 
+    def test_hide_callback_deletes_the_alert(self):
+        update = {
+            "callback_query": {
+                "id": "callback-hide",
+                "data": "hide:message",
+                "message": {"chat": {"id": 42}, "message_id": 91},
+            }
+        }
+        with patch.object(settings_bot, "api") as telegram:
+            settings_bot.handle_update(update, self.secrets, self.config, self.db)
+
+        self.assertEqual(
+            [call.args[1] for call in telegram.call_args_list],
+            ["answerCallbackQuery", "deleteMessage"],
+        )
+        self.assertEqual(telegram.call_args_list[1].args[2]["message_id"], 91)
+
     def test_plain_chat_message_does_not_complete_old_input(self):
         settings_bot.ensure_input_table(self.db)
         self.db.execute(

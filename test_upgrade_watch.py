@@ -195,6 +195,11 @@ class UpgradeWatchTests(unittest.TestCase):
             for call in send.call_args_list
         ))
         self.assertTrue(all(
+            call.kwargs["callback_text"] == "Скрыть"
+            and call.kwargs["callback_data"] == "hide:message"
+            for call in send.call_args_list
+        ))
+        self.assertTrue(all(
             '👤 Улучшил: <a href="https://t.me/darkcollector">@darkcollector</a>'
             in call.args[1]
             for call in send.call_args_list
