@@ -8,11 +8,13 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root{--bg:var(--tg-theme-bg-color,#0b0f16);--card:var(--tg-theme-secondary-bg-color,#151b26);--text:var(--tg-theme-text-color,#f4f7fb);--muted:var(--tg-theme-hint-color,#8d98aa);--accent:var(--tg-theme-button-color,#2f80ed);--accentText:var(--tg-theme-button-text-color,#fff);--line:rgba(145,160,180,.18);--good:#40c98b;--bad:#ff6577}
-    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:680px;margin:auto;padding:18px 14px 110px}.hero{padding:10px 4px 18px}.hero h1{font-size:27px;margin:0 0 6px}.hero p{margin:0;color:var(--muted)}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px}.card h2{font-size:16px;margin:0 0 14px}.row{display:flex;align-items:center;gap:10px;margin:10px 0}.row label{flex:1}.sub{display:block;color:var(--muted);font-size:12px;margin-top:2px}.price{display:grid;grid-template-columns:1fr 90px;gap:8px;margin:10px 0}.unit{display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.12);font-weight:700;color:var(--muted)}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.12);color:var(--text);padding:12px;font:inherit;outline:none}input:focus,select:focus,textarea:focus{border-color:var(--accent)}textarea{min-height:92px;resize:vertical}.switch{position:relative;width:46px;height:28px;flex:0 0 auto}.switch input{display:none}.slider{position:absolute;inset:0;border-radius:20px;background:#657080;transition:.18s}.slider:before{content:"";position:absolute;width:22px;height:22px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.18s}.switch input:checked+.slider{background:var(--accent)}.switch input:checked+.slider:before{transform:translateX(18px)}.tabs{display:flex;padding:3px;background:rgba(0,0,0,.13);border-radius:12px;margin-bottom:12px}.tab{flex:1;border:0;border-radius:9px;padding:9px;background:transparent;color:var(--muted);font-weight:650}.tab.active{background:var(--accent);color:var(--accentText)}.filter-panel{display:none}.filter-panel.active{display:block}.filter-grid{display:grid;gap:10px}.filter-grid label{font-size:13px;font-weight:650}.backdrop-actions{display:flex;gap:8px;margin:10px 0}.minor{flex:1;border:1px solid var(--line);border-radius:11px;padding:9px;background:rgba(0,0,0,.1);color:var(--text);font-weight:650}.backdrop-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:300px;overflow:auto;padding:2px}.backdrop-option{display:flex;align-items:center;gap:8px;padding:9px;border:1px solid var(--line);border-radius:11px;background:rgba(0,0,0,.08);font-size:13px}.backdrop-option input{width:18px;height:18px;margin:0;accent-color:var(--accent)}.backdrop-swatch{width:24px;height:24px;flex:0 0 24px;border-radius:50%;border:1px solid rgba(255,255,255,.3);box-shadow:inset 0 0 0 1px rgba(0,0,0,.18),0 1px 4px rgba(0,0,0,.24)}.footer{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 30%)}.save{display:block;width:min(652px,100%);margin:auto;border:0;border-radius:14px;padding:14px;background:var(--accent);color:var(--accentText);font-weight:750;font-size:16px}.save:disabled{opacity:.45}.note{font-size:12px;color:var(--muted);margin:8px 2px 0}.pill{display:inline-block;border-radius:999px;padding:4px 8px;background:rgba(64,201,139,.13);color:var(--good);font-size:12px;font-weight:700}.error{color:var(--bad)}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:680px;margin:auto;padding:18px 14px 170px}.app-view{display:none}.app-view.active{display:block}.hero{padding:10px 4px 18px}.hero h1{font-size:27px;margin:0 0 6px}.hero p{margin:0;color:var(--muted)}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px}.card h2{font-size:16px;margin:0 0 14px}.row{display:flex;align-items:center;gap:10px;margin:10px 0}.row label{flex:1}.sub{display:block;color:var(--muted);font-size:12px;margin-top:2px}.price{display:grid;grid-template-columns:1fr 90px;gap:8px;margin:10px 0}.unit{display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.12);font-weight:700;color:var(--muted)}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.12);color:var(--text);padding:12px;font:inherit;outline:none}input:focus,select:focus,textarea:focus{border-color:var(--accent)}textarea{min-height:92px;resize:vertical}.switch{position:relative;width:46px;height:28px;flex:0 0 auto}.switch input{display:none}.slider{position:absolute;inset:0;border-radius:20px;background:#657080;transition:.18s}.slider:before{content:"";position:absolute;width:22px;height:22px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.18s}.switch input:checked+.slider{background:var(--accent)}.switch input:checked+.slider:before{transform:translateX(18px)}.tabs{display:flex;padding:3px;background:rgba(0,0,0,.13);border-radius:12px;margin-bottom:12px}.tab{flex:1;border:0;border-radius:9px;padding:9px;background:transparent;color:var(--muted);font-weight:650}.tab.active{background:var(--accent);color:var(--accentText)}.filter-panel{display:none}.filter-panel.active{display:block}.filter-grid{display:grid;gap:10px}.filter-grid label{font-size:13px;font-weight:650}.backdrop-actions{display:flex;gap:8px;margin:10px 0}.minor{flex:1;border:1px solid var(--line);border-radius:11px;padding:9px;background:rgba(0,0,0,.1);color:var(--text);font-weight:650}.backdrop-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:300px;overflow:auto;padding:2px}.backdrop-option{display:flex;align-items:center;gap:8px;padding:9px;border:1px solid var(--line);border-radius:11px;background:rgba(0,0,0,.08);font-size:13px}.backdrop-option input{width:18px;height:18px;margin:0;accent-color:var(--accent)}.backdrop-swatch{width:24px;height:24px;flex:0 0 24px;border-radius:50%;border:1px solid rgba(255,255,255,.3);box-shadow:inset 0 0 0 1px rgba(0,0,0,.18),0 1px 4px rgba(0,0,0,.24)}.footer{position:fixed;z-index:8;left:0;right:0;bottom:70px;padding:12px 14px;background:linear-gradient(transparent,var(--bg) 30%)}.footer.hidden{display:none}.save{display:block;width:min(652px,100%);margin:auto;border:0;border-radius:14px;padding:14px;background:var(--accent);color:var(--accentText);font-weight:750;font-size:16px}.save:disabled{opacity:.45}.note{font-size:12px;color:var(--muted);margin:8px 2px 0}.pill{display:inline-block;border-radius:999px;padding:4px 8px;background:rgba(64,201,139,.13);color:var(--good);font-size:12px;font-weight:700}.error{color:var(--bad)}
+    .history-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.history-toolbar p{margin:0;color:var(--muted);font-size:13px}.reload{width:auto;padding:9px 12px}.history-list{display:grid;gap:10px}.history-more{width:100%;margin-top:12px}.history-card{background:var(--card);border:1px solid var(--line);border-radius:17px;padding:14px}.history-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.history-title{font-weight:760;font-size:16px}.history-market{color:var(--accent);font-size:12px;font-weight:750}.history-meta{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.history-chip{padding:5px 8px;border-radius:9px;background:rgba(127,145,170,.12);color:var(--muted);font-size:12px}.history-basis{font-size:13px;color:var(--muted);white-space:pre-wrap}.history-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}.history-time{font-size:11px;color:var(--muted)}.history-open{border:0;border-radius:11px;padding:9px 12px;background:var(--accent);color:var(--accentText);font-weight:700}.empty{padding:42px 20px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:18px}.bottom-nav{position:fixed;z-index:10;left:0;right:0;bottom:0;height:70px;padding:6px 10px calc(6px + env(safe-area-inset-bottom));display:flex;justify-content:center;background:var(--card);background:color-mix(in srgb,var(--card) 94%,transparent);border-top:1px solid var(--line);backdrop-filter:blur(16px)}.bottom-nav-inner{width:min(660px,100%);display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.nav-button{border:0;border-radius:12px;background:transparent;color:var(--muted);font:inherit;font-size:11px;font-weight:700;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}.nav-button span{font-size:20px;line-height:1}.nav-button.active{color:var(--accent);background:rgba(47,128,237,.1)}
   </style>
 </head>
 <body>
 <main class="wrap">
+<section id="view_settings" class="app-view active">
   <section class="hero">
     <span class="pill">Gift Watch</span>
     <h1>Настройки мониторинга</h1>
@@ -73,12 +75,37 @@
     </div></div>
   </section>
   <p id="status" class="note"></p>
+</section>
+
+<section id="view_upgrades" class="app-view">
+  <section class="hero"><span class="pill">История</span><h1>Улучшения</h1><p>Все отправленные тебе улучшения с доступным ником владельца.</p></section>
+  <div class="history-toolbar"><p>По 100 записей</p><button class="minor reload" data-reload="upgrade" type="button">Обновить</button></div>
+  <div id="history_upgrades" class="history-list"><div class="empty">Загрузка…</div></div>
+  <button class="minor history-more" data-more="upgrade" type="button" hidden>Показать ещё</button>
+</section>
+
+<section id="view_offers" class="app-view">
+  <section class="hero"><span class="pill">История</span><h1>Офферы</h1><p>Подходящие лоты с Tonnel, Portals и MRKT.</p></section>
+  <div class="history-toolbar"><p>По 100 записей</p><button class="minor reload" data-reload="offer" type="button">Обновить</button></div>
+  <div id="history_offers" class="history-list"><div class="empty">Загрузка…</div></div>
+  <button class="minor history-more" data-more="offer" type="button" hidden>Показать ещё</button>
+</section>
 </main>
-<div class="footer"><button id="save" class="save" disabled>Сохранить изменения</button></div>
+<div id="save_footer" class="footer"><button id="save" class="save" disabled>Сохранить изменения</button></div>
+<nav class="bottom-nav" aria-label="Разделы"><div class="bottom-nav-inner">
+  <button class="nav-button active" data-view="settings" type="button"><span>⚙️</span>Настройки</button>
+  <button class="nav-button" data-view="upgrades" type="button"><span>✨</span>Улучшения</button>
+  <button class="nav-button" data-view="offers" type="button"><span>🏷️</span>Офферы</button>
+</div></nav>
 
 <script>
   const tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { tg.ready(); tg.expand(); }
+  const HISTORY_API='https://tekqdsrukdaijmdpafpi.supabase.co/functions/v1/gift-watch-history';
+  const fragment=new URLSearchParams(location.hash.slice(1));
+  let historyToken=fragment.get('history')||localStorage.getItem('giftwatch_history_token')||'';
+  if(historyToken){localStorage.setItem('giftwatch_history_token',historyToken);if(tg&&tg.CloudStorage)tg.CloudStorage.setItem('giftwatch_history_token',historyToken,()=>{});history.replaceState(null,'',location.pathname+location.search)}
+  else if(tg&&tg.CloudStorage)tg.CloudStorage.getItem('giftwatch_history_token',(err,value)=>{if(!err&&value){historyToken=value;localStorage.setItem('giftwatch_history_token',value)}});
   const BACKDROPS = [
     'Black','Onyx Black','Gunmetal','Battleship Grey','Feldgrau','Steel Grey','Roman Silver','Platinum','Ivory White','Desert Sand',
     'Cappuccino','Seal Brown','Chocolate','Chestnut','Rosewood','Burgundy','Carmine','Fire Engine','Tomato','Burnt Sienna','Copper',
@@ -123,6 +150,36 @@
     'backdrops_allow','backdrops_deny'
   ];
   const save = document.getElementById('save');
+  const loadedHistory={offer:false,upgrade:false};
+  const historyItems={offer:[],upgrade:[]};
+  function openTarget(url){if(!url)return;if(tg&&url.startsWith('https://t.me/')&&tg.openTelegramLink)tg.openTelegramLink(url);else if(tg&&tg.openLink)tg.openLink(url);else window.open(url,'_blank','noopener')}
+  function addChip(root,text){if(!text)return;const chip=document.createElement('span');chip.className='history-chip';chip.textContent=text;root.append(chip)}
+  function renderHistory(kind,items){
+    const root=document.getElementById(kind==='offer'?'history_offers':'history_upgrades');root.textContent='';
+    if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=kind==='offer'?'Подходящих офферов пока нет.':'Подходящих улучшений пока нет.';root.append(empty);return}
+    items.forEach(item=>{
+      const card=document.createElement('article');card.className='history-card';
+      const top=document.createElement('div');top.className='history-top';
+      const title=document.createElement('div');title.className='history-title';title.textContent=item.title||'Подарок';
+      const market=document.createElement('div');market.className='history-market';market.textContent=item.market||'';top.append(title,market);card.append(top);
+      const meta=document.createElement('div');meta.className='history-meta';
+      if(item.price_ton!=null)addChip(meta,`Цена ${item.price_ton} TON`);if(item.floor_ton!=null)addChip(meta,`Floor ${item.floor_ton} TON`);
+      addChip(meta,item.model?`Модель: ${item.model}`:'');addChip(meta,item.backdrop?`Фон: ${item.backdrop}`:'');
+      if(item.owner_username)addChip(meta,`@${item.owner_username}`);if(item.sold)addChip(meta,'Продано');card.append(meta);
+      if(item.basis){const basis=document.createElement('div');basis.className='history-basis';basis.textContent=item.basis.replace(/<[^>]*>/g,'');card.append(basis)}
+      const actions=document.createElement('div');actions.className='history-actions';const date=document.createElement('span');date.className='history-time';date.textContent=new Date(item.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});actions.append(date);
+      if(item.target_url){const open=document.createElement('button');open.className='history-open';open.type='button';open.textContent=kind==='offer'?'Открыть оффер':'Открыть подарок';open.onclick=()=>openTarget(item.target_url);actions.append(open)}card.append(actions);root.append(card)
+    })
+  }
+  async function loadHistory(kind,force=false,more=false){
+    const root=document.getElementById(kind==='offer'?'history_offers':'history_upgrades');if(loadedHistory[kind]&&!force&&!more)return;
+    if(!historyToken){root.innerHTML='<div class="empty">Открой Mini App кнопкой из бота, чтобы загрузить личную историю.</div>';return}
+    if(!more)root.innerHTML='<div class="empty">Загрузка…</div>';
+    const offset=more?historyItems[kind].length:0;
+    try{const response=await fetch(HISTORY_API,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'read',kind,token:historyToken,offset})});if(!response.ok)throw new Error(String(response.status));const data=await response.json();const incoming=Array.isArray(data.items)?data.items:[];historyItems[kind]=more?historyItems[kind].concat(incoming):incoming;renderHistory(kind,historyItems[kind]);document.querySelector(`[data-more="${kind}"]`).hidden=!data.has_more;loadedHistory[kind]=true}catch(_){if(!more)root.innerHTML='<div class="empty error">Не удалось загрузить историю. Нажми «Обновить» чуть позже.</div>'}
+  }
+  function showView(name){document.querySelectorAll('.app-view').forEach(x=>x.classList.toggle('active',x.id==='view_'+name));document.querySelectorAll('.nav-button').forEach(x=>x.classList.toggle('active',x.dataset.view===name));document.getElementById('save_footer').classList.toggle('hidden',name!=='settings');if(name==='offers')loadHistory('offer');if(name==='upgrades')loadHistory('upgrade');window.scrollTo({top:0,behavior:'auto'})}
+  document.querySelectorAll('.nav-button').forEach(button=>button.onclick=()=>showView(button.dataset.view));document.querySelectorAll('[data-reload]').forEach(button=>button.onclick=()=>loadHistory(button.dataset.reload,true));document.querySelectorAll('[data-more]').forEach(button=>button.onclick=()=>loadHistory(button.dataset.more,false,true));
   function mark(group){ dirty.add(group); save.disabled=false; }
   document.querySelectorAll('input,select,textarea').forEach(el => {
     if(el.id==='backdrop_search')return;

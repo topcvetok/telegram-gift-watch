@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from html import escape
 
 from bot import telegram_edit
+from history_store import mark_offer_sold as mark_history_offer_sold
 
 
 def ensure_table(db):
@@ -181,6 +182,11 @@ def mark_offer_sold(db, market, gift_id, secrets, *, sale_price=None, send=True)
                     secrets, int(legacy[2]), _sold_text(legacy, sale_price),
                     preview_url=_preview_url(legacy[4], legacy[5], legacy[7]),
                 )
+    history_chats = {str(row[8]) for row in rows}
+    if legacy is not None and not history_chats:
+        history_chats.add(str(secrets.get("chat_id", "__default__")))
+    for chat_id in history_chats:
+        mark_history_offer_sold(db, secrets, chat_id, market, gift_id)
     db.execute(
         "UPDATE offer_messages_by_chat SET sold=1, sold_at=? "
         "WHERE market=? AND gift_id=?",

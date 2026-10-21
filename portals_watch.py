@@ -17,6 +17,7 @@ except ImportError:
 from alert_format import format_market_alert
 from bot import ROOT, telegram
 from alert_tracking import mark_offer_sold, pending_offer_ids, remember_alert
+from history_store import record_offer
 from market_data import (
     apply_activity_evidence,
     complete_market_floors,
@@ -564,6 +565,10 @@ def send_if_new_price(item, result, config, secrets, db, send=True, *, chat_id=N
     remember_alert(
         db, "Portals", item, result, message_id, preview_url=preview_url,
         chat_id=recipient,
+    )
+    record_offer(
+        db, secrets, recipient, "Portals", item, result,
+        listing_link(item), preview_url,
     )
     db.execute(
         "INSERT OR REPLACE INTO portals_alerts_by_chat VALUES (?, ?, ?, ?)",

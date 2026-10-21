@@ -17,6 +17,7 @@
   "daily_report_hour": 21,
   "daily_report_timezone": "Europe/Moscow",
   "mini_app_url": "https://topcvetok.github.io/telegram-gift-watch/",
+  "history_api_url": "https://tekqdsrukdaijmdpafpi.supabase.co/functions/v1/gift-watch-history",
   "monochrome_min_score": 80,
   "monochrome_max_floor_premium_percent": 15,
   "monochrome_cache_seconds": 2592000,

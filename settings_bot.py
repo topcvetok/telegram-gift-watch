@@ -5,8 +5,10 @@ import json
 import sqlite3
 import sys
 import time
+import urllib.parse
 
 from bot import ROOT, request_json
+from history_store import access_token
 from runtime_settings import (
     FEATURE_LABELS,
     NUMBER_SETTING_LABELS,
@@ -15,6 +17,7 @@ from runtime_settings import (
     authorize_chat,
     is_authorized,
     revoke_chat,
+    recipient_chat_ids,
     replace_filters,
     set_feature_enabled,
     set_number_setting,
@@ -81,6 +84,9 @@ def send_app_launcher(secrets, config):
     app_url = str(config.get("mini_app_url") or "").strip()
     if not app_url:
         raise ValueError("Mini App пока не настроен")
+    token = access_token(secrets, secrets["chat_id"])
+    if token:
+        app_url = app_url.split("#", 1)[0] + "#history=" + urllib.parse.quote(token)
     return api(secrets, "sendMessage", {
         "chat_id": secrets["chat_id"],
         "text": "Открой Mini App кнопкой ниже. После сохранения изменения сразу попадут в бот.",
@@ -94,6 +100,31 @@ def send_app_launcher(secrets, config):
         },
         "link_preview_options": {"is_disabled": True},
     })
+
+
+def send_history_launchers(secrets, config, db, version=1):
+    """Send the tokenized Mini App button once to every active profile."""
+    if not secrets.get("history_writer_token"):
+        return 0
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS history_launcher_sent "
+        "(chat_id TEXT PRIMARY KEY, version INTEGER NOT NULL)"
+    )
+    sent = 0
+    for chat_id in recipient_chat_ids(db, secrets["chat_id"]):
+        row = db.execute(
+            "SELECT version FROM history_launcher_sent WHERE chat_id=?", (str(chat_id),)
+        ).fetchone()
+        if row and int(row[0]) >= int(version):
+            continue
+        send_app_launcher(dict(secrets, chat_id=str(chat_id)), config)
+        db.execute(
+            "INSERT OR REPLACE INTO history_launcher_sent (chat_id, version) VALUES (?, ?)",
+            (str(chat_id), int(version)),
+        )
+        db.commit()
+        sent += 1
+    return sent
 
 
 def ensure_input_table(db):
@@ -271,6 +302,7 @@ def run(config, secrets, db, duration=3300):
     # Hide the command menu; manually entered /app sends the compatible launcher.
     api(secrets, "setChatMenuButton", {"menu_button": {"type": "default"}})
     remove_legacy_settings_views(secrets, db)
+    send_history_launchers(secrets, config, db)
     deadline = time.monotonic() + max(1, int(duration))
     offset = None
     while time.monotonic() < deadline:

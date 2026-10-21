@@ -92,11 +92,13 @@ class AlertTrackingTests(unittest.TestCase):
             db, "Tonnel", item, result, 200, chat_id="99"
         )
         with patch.object(alert_tracking, "telegram_edit", return_value=True) as edit:
-            self.assertTrue(alert_tracking.mark_offer_sold(
-                db, "Tonnel", "gift-shared", {"chat_id": "42"}
-            ))
+            with patch.object(alert_tracking, "mark_history_offer_sold") as history:
+                self.assertTrue(alert_tracking.mark_offer_sold(
+                    db, "Tonnel", "gift-shared", {"chat_id": "42"}
+                ))
         recipients = {call.args[0]["chat_id"] for call in edit.call_args_list}
         self.assertEqual(recipients, {"42", "99"})
+        self.assertEqual({call.args[2] for call in history.call_args_list}, {"42", "99"})
 
 
 if __name__ == "__main__":

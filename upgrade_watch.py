@@ -16,6 +16,7 @@ from curl_cffi import requests
 from PIL import Image
 
 from bot import ROOT, telegram
+from history_store import record_upgrade
 from runtime_settings import (
     DEFAULT_UPGRADE_BACKDROPS,
     activate_settings,
@@ -447,6 +448,7 @@ def send_candidate(candidate, config, secrets, db, send=True):
             (gift_id, recipient, message_id, time.time()),
         )
         db.commit()
+        record_upgrade(db, secrets, recipient, candidate, reasons, link)
         delivered += 1
     return delivered
 

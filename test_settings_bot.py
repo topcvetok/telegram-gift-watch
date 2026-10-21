@@ -66,6 +66,31 @@ class SettingsBotTests(unittest.TestCase):
         self.assertEqual(telegram.call_args.args[1], "sendMessage")
         self.assertIn("keyboard", telegram.call_args.args[2]["reply_markup"])
 
+    def test_launcher_carries_private_history_token_in_fragment(self):
+        secrets = dict(
+            self.secrets,
+            history_writer_token="writer-secret-which-is-long-enough",
+        )
+        with patch.object(settings_bot, "api") as telegram:
+            settings_bot.send_app_launcher(secrets, self.config)
+        url = telegram.call_args.args[2]["reply_markup"]["keyboard"][0][0]["web_app"]["url"]
+        self.assertTrue(url.startswith("https://example.com/app#history="))
+        self.assertNotIn("writer-secret", url)
+
+    def test_history_launcher_is_sent_only_once_per_version(self):
+        secrets = dict(
+            self.secrets,
+            history_writer_token="writer-secret-which-is-long-enough",
+        )
+        with patch.object(settings_bot, "send_app_launcher") as launcher:
+            self.assertEqual(
+                settings_bot.send_history_launchers(secrets, self.config, self.db), 1
+            )
+            self.assertEqual(
+                settings_bot.send_history_launchers(secrets, self.config, self.db), 0
+            )
+        launcher.assert_called_once()
+
     def test_mini_app_payload_updates_settings_without_chat_panel(self):
         payload = {
             "type": "save_settings",

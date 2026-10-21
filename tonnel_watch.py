@@ -18,6 +18,7 @@ except ImportError:
 from bot import ROOT, telegram
 from alert_tracking import mark_offer_sold, remember_alert
 from alert_format import format_market_alert
+from history_store import record_offer
 from market_data import record_market_activity
 from runtime_settings import (
     activate_settings, active_profiles, item_allowed, source_enabled, threshold_ton,
@@ -619,6 +620,10 @@ def send_if_new_price(item, result, config, secrets, db, send, *, chat_id=None):
     remember_alert(
         db, "Tonnel", item, result, message_id, preview_url=preview_url,
         chat_id=recipient,
+    )
+    record_offer(
+        db, secrets, recipient, "Tonnel", item, result,
+        listing_link(item), preview_url,
     )
     db.execute(
         "INSERT OR REPLACE INTO tonnel_alerts_by_chat VALUES (?, ?, ?, ?)",
