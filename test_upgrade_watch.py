@@ -209,6 +209,24 @@ class UpgradeWatchTests(unittest.TestCase):
         }
         self.assertIn("👤 Улучшил: <b>ник скрыт</b>", watch.format_alert(candidate))
 
+    def test_upgrade_without_public_username_is_not_sent(self):
+        candidate = {
+            "collection": "Test Gift",
+            "number": 2,
+            "backdrop": "Black",
+            "owner": "Visible name without username",
+        }
+        with sqlite3.connect(":memory:") as db, \
+                patch.object(watch, "active_profiles") as profiles, \
+                patch.object(watch, "telegram") as send:
+            watch.ensure_tables(db)
+            self.assertEqual(
+                watch.send_candidate(candidate, {}, {"chat_id": "owner"}, db),
+                0,
+            )
+        profiles.assert_not_called()
+        send.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

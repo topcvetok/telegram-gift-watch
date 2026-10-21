@@ -289,9 +289,16 @@ def gift_link(candidate):
     )
 
 
-def format_owner(candidate):
+def contact_username(candidate):
     username = str(candidate.get("owner_username") or "").strip().lstrip("@")
     if re.fullmatch(r"[A-Za-z0-9_]{4,32}", username):
+        return username
+    return None
+
+
+def format_owner(candidate):
+    username = contact_username(candidate)
+    if username:
         escaped = html.escape(username)
         return f'<a href="https://t.me/{escaped}">@{escaped}</a>'
     owner = str(candidate.get("owner") or "").strip()
@@ -407,6 +414,8 @@ def candidate_reasons(candidate, user_config):
 
 
 def send_candidate(candidate, config, secrets, db, send=True):
+    if contact_username(candidate) is None:
+        return 0
     delivered = 0
     link = gift_link(candidate)
     gift_id = f"{telegram_slug(candidate['collection'])}-{int(candidate['number'])}"
