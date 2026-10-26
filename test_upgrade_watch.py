@@ -221,14 +221,18 @@ class UpgradeWatchTests(unittest.TestCase):
             "backdrop": "Black",
             "owner": "Visible name without username",
         }
+        stats = {}
         with sqlite3.connect(":memory:") as db, \
                 patch.object(watch, "active_profiles") as profiles, \
                 patch.object(watch, "telegram") as send:
             watch.ensure_tables(db)
             self.assertEqual(
-                watch.send_candidate(candidate, {}, {"chat_id": "owner"}, db),
+                watch.send_candidate(
+                    candidate, {}, {"chat_id": "owner"}, db, stats=stats
+                ),
                 0,
             )
+        self.assertEqual(stats, {"candidates": 1, "no_username": 1})
         profiles.assert_not_called()
         send.assert_not_called()
 

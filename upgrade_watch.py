@@ -414,15 +414,23 @@ def candidate_reasons(candidate, user_config):
     return reasons
 
 
-def send_candidate(candidate, config, secrets, db, send=True):
+def send_candidate(candidate, config, secrets, db, send=True, stats=None):
+    if stats is not None:
+        stats["candidates"] = stats.get("candidates", 0) + 1
     if contact_username(candidate) is None:
+        if stats is not None:
+            stats["no_username"] = stats.get("no_username", 0) + 1
         return 0
     delivered = 0
     link = gift_link(candidate)
     gift_id = f"{telegram_slug(candidate['collection'])}-{int(candidate['number'])}"
     for chat_id, user_config in active_profiles(config):
+        if stats is not None:
+            stats["profile_checks"] = stats.get("profile_checks", 0) + 1
         reasons = candidate_reasons(candidate, user_config)
         if not reasons:
+            if stats is not None:
+                stats["no_reason"] = stats.get("no_reason", 0) + 1
             continue
         recipient = str(chat_id if chat_id is not None else secrets["chat_id"])
         old = db.execute(
@@ -430,6 +438,8 @@ def send_candidate(candidate, config, secrets, db, send=True):
             (gift_id, recipient),
         ).fetchone()
         if old:
+            if stats is not None:
+                stats["duplicate"] = stats.get("duplicate", 0) + 1
             continue
         if not send:
             print(format_alert(candidate, reasons) + "\n" + link + "\n", flush=True)
@@ -449,6 +459,8 @@ def send_candidate(candidate, config, secrets, db, send=True):
         )
         db.commit()
         record_upgrade(db, secrets, recipient, candidate, reasons, link)
+        if stats is not None:
+            stats["sent"] = stats.get("sent", 0) + 1
         delivered += 1
     return delivered
 
@@ -466,6 +478,7 @@ def run_cycle(config, secrets, db, send=True):
     workers = max(1, int(config.get("dark_upgrade_workers", 12)))
     max_batch = max(1, int(config.get("dark_upgrade_max_batch", 250)))
     delivered = 0
+    stats = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [
             pool.submit(scan_collection, name, number, max_batch)
@@ -499,9 +512,32 @@ def run_cycle(config, secrets, db, send=True):
                 candidate["collection_floor_ton"] = floor
                 candidate["collection_floor_market"] = floor_market
                 try:
-                    delivered += send_candidate(candidate, config, secrets, db, send)
+                    delivered += send_candidate(
+                        candidate, config, secrets, db, send, stats=stats
+                    )
                 except RuntimeError as exc:
                     print(f"Уведомление об улучшении: {exc}", file=sys.stderr, flush=True)
+    if stats.get("candidates"):
+        profiles = []
+        for index, (_, user_config) in enumerate(active_profiles(config), 1):
+            selected = user_config.get("upgrade_backdrops", DEFAULT_UPGRADE_BACKDROPS)
+            profiles.append(
+                f"профиль {index}: цвета="
+                f"{'вкл' if feature_enabled(user_config, 'dark_upgrades') else 'выкл'}"
+                f" ({len(selected)}), floor="
+                f"{'вкл' if feature_enabled(user_config, 'valuable_upgrades') else 'выкл'}"
+                f" от {ton_text(decimal(user_config.get('upgrade_min_floor_ton', 10)))} TON"
+            )
+        print("Настройки улучшений: " + "; ".join(profiles), flush=True)
+        print(
+            "Разбор улучшений: "
+            f"найдено {stats.get('candidates', 0)}; "
+            f"без публичного ника {stats.get('no_username', 0)}; "
+            f"без подходящего основания {stats.get('no_reason', 0)} из "
+            f"{stats.get('profile_checks', 0)} проверок профиля; "
+            f"повторов {stats.get('duplicate', 0)}; отправлено {stats.get('sent', 0)}.",
+            flush=True,
+        )
     print(
         f"Проверено {len(rows)} коллекций Telegram; отправлено {delivered} уведомлений.",
         flush=True,
