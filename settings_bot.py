@@ -8,22 +8,15 @@ import time
 import urllib.parse
 
 from bot import ROOT, request_json
-from history_store import access_token
+from history_store import access_token, register_settings_profile
 from runtime_settings import (
-    FEATURE_LABELS,
-    NUMBER_SETTING_LABELS,
-    SOURCE_LABELS,
     activate_settings,
+    apply_settings_dict,
     authorize_chat,
     is_authorized,
     revoke_chat,
     recipient_chat_ids,
-    replace_filters,
-    set_feature_enabled,
-    set_number_setting,
-    set_setting,
-    set_source_enabled,
-    set_upgrade_backdrops,
+    sync_remote_settings,
 )
 
 
@@ -86,6 +79,7 @@ def send_app_launcher(secrets, config):
         raise ValueError("Mini App пока не настроен")
     token = access_token(secrets, secrets["chat_id"])
     if token:
+        register_settings_profile(secrets, secrets["chat_id"])
         app_url = app_url.split("#", 1)[0] + "#history=" + urllib.parse.quote(token)
     return api(secrets, "sendMessage", {
         "chat_id": secrets["chat_id"],
@@ -191,38 +185,7 @@ def apply_web_app_payload(data, db, chat_id=None):
     if not isinstance(payload, dict) or payload.get("type") != "save_settings":
         raise ValueError("Неизвестная команда Mini App")
     settings = payload.get("settings")
-    if not isinstance(settings, dict):
-        raise ValueError("Mini App не передал настройки")
-    prices = settings.get("prices") or {}
-    for name, key in (
-        ("max_lot", "max_lot_rub"),
-        ("min_floor", "min_floor_rub"),
-        ("upgrade_min_floor", "upgrade_min_floor_rub"),
-    ):
-        entry = prices.get(name)
-        if isinstance(entry, dict):
-            set_setting(
-                db, key, entry.get("value"),
-                currency=(
-                    "ton" if name == "upgrade_min_floor"
-                    else str(entry.get("currency") or "rub").casefold()
-                ),
-                chat_id=chat_id,
-            )
-    for source, enabled in (settings.get("sources") or {}).items():
-        if source in SOURCE_LABELS and isinstance(enabled, bool):
-            set_source_enabled(db, source, enabled, chat_id=chat_id)
-    for feature, enabled in (settings.get("features") or {}).items():
-        if feature in FEATURE_LABELS and isinstance(enabled, bool):
-            set_feature_enabled(db, feature, enabled, chat_id=chat_id)
-    for key, value in (settings.get("numbers") or {}).items():
-        if key in NUMBER_SETTING_LABELS:
-            set_number_setting(db, key, value, chat_id=chat_id)
-    if "upgrade_backdrops" in settings:
-        set_upgrade_backdrops(db, settings["upgrade_backdrops"], chat_id=chat_id)
-    if "filters" in settings:
-        replace_filters(db, settings.get("filters") or {}, chat_id=chat_id)
-    return True
+    return apply_settings_dict(settings, db, chat_id)
 
 
 def handle_update(update, secrets, config, db):
@@ -306,7 +269,8 @@ def run(config, secrets, db, duration=3300):
     deadline = time.monotonic() + max(1, int(duration))
     offset = None
     while time.monotonic() < deadline:
-        payload = {"timeout": 15, "limit": 20}
+        sync_remote_settings(db, secrets)
+        payload = {"timeout": 5, "limit": 20}
         if offset is not None:
             payload["offset"] = offset
         try:
@@ -332,7 +296,7 @@ def main():
     with sqlite3.connect(ROOT / "settings.sqlite3", timeout=5) as db:
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA busy_timeout=5000")
-        activate_settings(db, secrets["chat_id"])
+        activate_settings(db, secrets["chat_id"], secrets)
         run(config, secrets, db, args.duration)
 
 

@@ -20,6 +20,12 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("action:'read',kind,token:historyToken,offset", self.source)
         self.assertNotIn("searchParams.set('token'", self.source)
 
+    def test_settings_use_durable_backend_instead_of_telegram_send_data(self):
+        self.assertIn("action:'settings_read',token:historyToken", self.source)
+        self.assertIn("action:'settings_save',token:historyToken,settings", self.source)
+        self.assertNotIn("tg.sendData(payload)", self.source)
+        self.assertIn("'max_lot','min_floor'", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

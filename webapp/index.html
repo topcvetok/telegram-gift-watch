@@ -141,6 +141,7 @@
   let backdropSelection = new Set(['Black','Onyx Black']);
   const dirty = new Set();
   const stateIds = [
+    'max_lot','min_floor',
     'source_tonnel','source_portals','source_mrkt','feature_collection_basis',
     'feature_model_basis','feature_backdrop_basis','feature_beautiful_number',
     'feature_monochrome','feature_dark_upgrades','feature_valuable_upgrades','feature_daily_report',
@@ -209,28 +210,55 @@
   document.getElementById('backdrop_search').addEventListener('input',renderBackdrops);
   document.getElementById('backdrops_all').onclick=()=>{backdropSelection=new Set(BACKDROPS);renderBackdrops();mark('upgrade_backdrops')};
   document.getElementById('backdrops_none').onclick=()=>{backdropSelection.clear();renderBackdrops();mark('upgrade_backdrops')};
-  renderBackdrops();
-  if(tg && tg.CloudStorage) tg.CloudStorage.getItem('giftwatch_form_v1',(err,value)=>{if(!err&&value)restore(value)});
-  save.onclick=()=>{
-    const settings={prices:{},sources:{},features:{},numbers:{}};
-    for(const name of ['max_lot','min_floor','upgrade_min_floor']) if(dirty.has(name)||dirty.has(name+'_currency')){
-      const value=document.getElementById(name).value.trim();
-      if(value)settings.prices[name]={value,currency:name==='upgrade_min_floor'?'ton':document.getElementById(name+'_currency').value};
-    }
-    for(const name of ['tonnel','portals','mrkt']) if(dirty.has('source_'+name))settings.sources[name]=document.getElementById('source_'+name).checked;
-    for(const name of ['collection_basis','model_basis','backdrop_basis','beautiful_number','monochrome','dark_upgrades','valuable_upgrades','daily_report']) if(dirty.has('feature_'+name))settings.features[name]=document.getElementById('feature_'+name).checked;
-    if(dirty.has('upgrade_backdrops'))settings.upgrade_backdrops=[...backdropSelection];
-    if(dirty.has('daily_report_hour'))settings.numbers.daily_report_hour=Number(document.getElementById('daily_report_hour').value);
-    if(dirty.has('filters'))settings.filters={};
-    if(dirty.has('filters'))for(const scope of ['collections','models','backdrops'])settings.filters[scope]={allow:lines(scope+'_allow'),deny:lines(scope+'_deny')};
-    const payload=JSON.stringify({type:'save_settings',settings});
-    const status=document.getElementById('status');
-    if(new TextEncoder().encode(payload).length>4000){status.textContent='Списки слишком длинные для одного сохранения.';status.className='note error';return;}
-    if(tg && tg.CloudStorage)tg.CloudStorage.setItem('giftwatch_form_v1',JSON.stringify(snapshot()),()=>{});
-    if(!tg || !tg.sendData){status.textContent='Открой приложение через кнопку в Telegram.';status.className='note error';return;}
-    tg.sendData(payload);
-    tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success');
-    tg.close();
+  const DEFAULT_SETTINGS={
+    prices:{max_lot:{value:'2000',currency:'rub'},min_floor:{value:'1000',currency:'rub'},upgrade_min_floor:{value:'10',currency:'ton'}},
+    sources:{tonnel:true,portals:true,mrkt:true},
+    features:{collection_basis:false,model_basis:true,backdrop_basis:true,beautiful_number:true,monochrome:true,dark_upgrades:true,valuable_upgrades:true,daily_report:true},
+    numbers:{daily_report_hour:21},upgrade_backdrops:['Black','Onyx Black'],
+    filters:{collections:{allow:[],deny:[]},models:{allow:[],deny:[]},backdrops:{allow:[],deny:[]}}
+  };
+  function mergedSettings(value){
+    const data=value&&typeof value==='object'?value:{};const filters={};
+    for(const scope of ['collections','models','backdrops'])filters[scope]={...DEFAULT_SETTINGS.filters[scope],...((data.filters||{})[scope]||{})};
+    return {prices:{...DEFAULT_SETTINGS.prices,...(data.prices||{})},sources:{...DEFAULT_SETTINGS.sources,...(data.sources||{})},features:{...DEFAULT_SETTINGS.features,...(data.features||{})},numbers:{...DEFAULT_SETTINGS.numbers,...(data.numbers||{})},upgrade_backdrops:Array.isArray(data.upgrade_backdrops)?data.upgrade_backdrops:DEFAULT_SETTINGS.upgrade_backdrops,filters};
+  }
+  function applySettings(value){
+    const settings=mergedSettings(value);
+    for(const name of ['max_lot','min_floor','upgrade_min_floor']){const entry=settings.prices[name]||{};document.getElementById(name).value=entry.value??'';if(name!=='upgrade_min_floor')document.getElementById(name+'_currency').value=entry.currency||'rub'}
+    for(const name of ['tonnel','portals','mrkt'])document.getElementById('source_'+name).checked=settings.sources[name]!==false;
+    for(const name of ['collection_basis','model_basis','backdrop_basis','beautiful_number','monochrome','dark_upgrades','valuable_upgrades','daily_report'])document.getElementById('feature_'+name).checked=settings.features[name]!==false;
+    document.getElementById('daily_report_hour').value=settings.numbers.daily_report_hour;
+    backdropSelection=new Set(settings.upgrade_backdrops.filter(x=>BACKDROPS.includes(x)));
+    for(const scope of ['collections','models','backdrops'])for(const mode of ['allow','deny'])document.getElementById(scope+'_'+mode).value=(settings.filters[scope][mode]||[]).join('\n');
+    renderBackdrops();dirty.clear();save.disabled=true;
+  }
+  function currentSettings(){
+    const settings={prices:{},sources:{},features:{},numbers:{},upgrade_backdrops:[...backdropSelection],filters:{}};
+    for(const name of ['max_lot','min_floor','upgrade_min_floor'])settings.prices[name]={value:document.getElementById(name).value.trim().replace(',','.'),currency:name==='upgrade_min_floor'?'ton':document.getElementById(name+'_currency').value};
+    for(const name of ['tonnel','portals','mrkt'])settings.sources[name]=document.getElementById('source_'+name).checked;
+    for(const name of ['collection_basis','model_basis','backdrop_basis','beautiful_number','monochrome','dark_upgrades','valuable_upgrades','daily_report'])settings.features[name]=document.getElementById('feature_'+name).checked;
+    settings.numbers.daily_report_hour=Number(document.getElementById('daily_report_hour').value);
+    for(const scope of ['collections','models','backdrops'])settings.filters[scope]={allow:lines(scope+'_allow'),deny:lines(scope+'_deny')};
+    return settings;
+  }
+  function settingsError(settings){
+    for(const name of ['max_lot','min_floor','upgrade_min_floor']){const entry=settings.prices[name];const amount=Number(entry.value);if(entry.value===''||!Number.isFinite(amount)||amount<0)return 'Проверь числовые лимиты.';if(name==='max_lot'&&amount<=0)return 'Максимальная стоимость должна быть больше нуля.';if(entry.currency==='rub'&&!Number.isInteger(amount))return 'Сумму в рублях укажи целым числом.'}
+    const hour=settings.numbers.daily_report_hour;if(!Number.isInteger(hour)||hour<0||hour>23)return 'Час отчёта должен быть от 0 до 23.';return '';
+  }
+  async function loadSettings(){
+    const status=document.getElementById('status');applySettings(DEFAULT_SETTINGS);
+    if(!historyToken){status.textContent='Открой Mini App кнопкой из бота, чтобы загрузить настройки.';status.className='note error';return}
+    status.textContent='Загрузка настроек…';status.className='note';
+    try{const response=await fetch(HISTORY_API,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'settings_read',token:historyToken})});if(!response.ok)throw new Error(String(response.status));const data=await response.json();applySettings(data.settings);status.textContent='Настройки загружены.';localStorage.setItem('giftwatch_form_v2',JSON.stringify(currentSettings()))}catch(_){const cached=localStorage.getItem('giftwatch_form_v2');if(cached)try{applySettings(JSON.parse(cached))}catch(_error){}status.textContent='Не удалось загрузить настройки. Открой Mini App заново через кнопку бота.';status.className='note error'}
+  }
+  renderBackdrops();loadSettings();
+  save.onclick=async()=>{
+    const status=document.getElementById('status');const settings=currentSettings();const payload=JSON.stringify({action:'settings_save',token:historyToken,settings});
+    if(!historyToken){status.textContent='Открой Mini App кнопкой из бота.';status.className='note error';return}
+    const validation=settingsError(settings);if(validation){status.textContent=validation;status.className='note error';return}
+    if(new TextEncoder().encode(payload).length>48000){status.textContent='Списки слишком длинные для одного сохранения.';status.className='note error';return}
+    save.disabled=true;status.textContent='Сохраняю…';status.className='note';
+    try{const response=await fetch(HISTORY_API,{method:'POST',headers:{'content-type':'application/json'},body:payload});if(!response.ok)throw new Error(String(response.status));localStorage.setItem('giftwatch_form_v2',JSON.stringify(settings));dirty.clear();status.textContent='Сохранено. Бот применит изменения в течение нескольких секунд.';tg&&tg.HapticFeedback&&tg.HapticFeedback.notificationOccurred('success')}catch(_){save.disabled=false;status.textContent='Не удалось сохранить. Попробуй ещё раз.';status.className='note error'}
   };
 </script>
 </body>

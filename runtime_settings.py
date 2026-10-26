@@ -1,6 +1,8 @@
 """Persistent user-adjustable monitor thresholds."""
 
 import json
+import sys
+import time
 from decimal import Decimal, InvalidOperation
 
 
@@ -68,22 +70,33 @@ FILTER_MODES = {"allow", "deny"}
 
 _ACTIVE_SETTINGS_DB = None
 _ACTIVE_OWNER_CHAT_ID = None
+_ACTIVE_REMOTE = None
+_LAST_REMOTE_SYNC = 0.0
 DEFAULT_PROFILE = "__default__"
 
 
-def activate_settings(db, owner_chat_id=None):
+def activate_settings(db, owner_chat_id=None, remote=None):
     """Set the dedicated settings connection for this monitor process."""
-    global _ACTIVE_SETTINGS_DB, _ACTIVE_OWNER_CHAT_ID
+    global _ACTIVE_SETTINGS_DB, _ACTIVE_OWNER_CHAT_ID, _ACTIVE_REMOTE
+    global _LAST_REMOTE_SYNC
     _ACTIVE_SETTINGS_DB = db
     _ACTIVE_OWNER_CHAT_ID = str(owner_chat_id) if owner_chat_id is not None else None
+    _ACTIVE_REMOTE = remote
+    _LAST_REMOTE_SYNC = 0.0
     if db is not None:
         ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
+        if remote and _ACTIVE_OWNER_CHAT_ID is not None:
+            from history_store import register_settings_profile
+            register_settings_profile(remote, _ACTIVE_OWNER_CHAT_ID)
+            sync_remote_settings(db, remote, force=True)
 
 
 def active_config(config):
     """Apply live settings when a production settings connection is active."""
     if _ACTIVE_SETTINGS_DB is None:
         return dict(config)
+    if _ACTIVE_REMOTE:
+        sync_remote_settings(_ACTIVE_SETTINGS_DB, _ACTIVE_REMOTE)
     return effective_config(config, _ACTIVE_SETTINGS_DB, _ACTIVE_OWNER_CHAT_ID)
 
 
@@ -91,6 +104,8 @@ def active_profiles(config):
     """Return (chat_id, config) pairs for every authorized recipient."""
     if _ACTIVE_SETTINGS_DB is None or _ACTIVE_OWNER_CHAT_ID is None:
         return [(None, dict(config))]
+    if _ACTIVE_REMOTE:
+        sync_remote_settings(_ACTIVE_SETTINGS_DB, _ACTIVE_REMOTE)
     return [
         (chat_id, effective_config(config, _ACTIVE_SETTINGS_DB, chat_id))
         for chat_id in recipient_chat_ids(_ACTIVE_SETTINGS_DB, _ACTIVE_OWNER_CHAT_ID)
@@ -116,6 +131,10 @@ def ensure_settings_table(db, owner_chat_id=None):
         "chat_id TEXT NOT NULL, scope TEXT NOT NULL, mode TEXT NOT NULL, "
         "value TEXT NOT NULL, normalized TEXT NOT NULL, updated REAL NOT NULL, "
         "PRIMARY KEY (chat_id, scope, mode, normalized))"
+    )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS remote_settings_versions ("
+        "chat_id TEXT PRIMARY KEY, updated TEXT NOT NULL)"
     )
     if owner_chat_id is not None:
         db.execute(
@@ -389,6 +408,103 @@ def set_upgrade_backdrops(db, values, *, chat_id=None):
     )
     db.commit()
     return selected
+
+
+def apply_settings_dict(settings, db, chat_id=None):
+    """Validate and persist one complete or partial Mini App settings object."""
+    if not isinstance(settings, dict):
+        raise ValueError("Mini App не передал настройки")
+    prices = settings.get("prices") or {}
+    if not isinstance(prices, dict):
+        raise ValueError("Некорректные лимиты")
+    for name, key in (
+        ("max_lot", "max_lot_rub"),
+        ("min_floor", "min_floor_rub"),
+        ("upgrade_min_floor", "upgrade_min_floor_rub"),
+    ):
+        entry = prices.get(name)
+        if isinstance(entry, dict):
+            set_setting(
+                db, key, entry.get("value"),
+                currency=(
+                    "ton" if name == "upgrade_min_floor"
+                    else str(entry.get("currency") or "rub").casefold()
+                ),
+                chat_id=chat_id,
+            )
+    sources = settings.get("sources") or {}
+    if not isinstance(sources, dict):
+        raise ValueError("Некорректный список площадок")
+    for source, enabled in sources.items():
+        if source in SOURCE_LABELS and isinstance(enabled, bool):
+            set_source_enabled(db, source, enabled, chat_id=chat_id)
+    features = settings.get("features") or {}
+    if not isinstance(features, dict):
+        raise ValueError("Некорректный список оснований")
+    for feature, enabled in features.items():
+        if feature in FEATURE_LABELS and isinstance(enabled, bool):
+            set_feature_enabled(db, feature, enabled, chat_id=chat_id)
+    numbers = settings.get("numbers") or {}
+    if not isinstance(numbers, dict):
+        raise ValueError("Некорректные числовые настройки")
+    for key, value in numbers.items():
+        if key in NUMBER_SETTING_LABELS:
+            set_number_setting(db, key, value, chat_id=chat_id)
+    if "upgrade_backdrops" in settings:
+        set_upgrade_backdrops(db, settings["upgrade_backdrops"], chat_id=chat_id)
+    if "filters" in settings:
+        replace_filters(db, settings.get("filters") or {}, chat_id=chat_id)
+    return True
+
+
+def sync_remote_settings(db, secrets, *, force=False, interval=5):
+    """Pull Mini App settings from the durable backend into the live SQLite DB."""
+    global _LAST_REMOTE_SYNC
+    now = time.monotonic()
+    if not force and now - _LAST_REMOTE_SYNC < max(1, int(interval)):
+        return 0
+    _LAST_REMOTE_SYNC = now
+    from history_store import pull_settings_profiles
+
+    owner = str(secrets.get("chat_id") or _ACTIVE_OWNER_CHAT_ID or "")
+    if not owner:
+        return 0
+    profiles = pull_settings_profiles(secrets)
+    if profiles is None:
+        return 0
+    ensure_settings_table(db, owner)
+    allowed = set(recipient_chat_ids(db, owner))
+    applied = 0
+    for row in profiles:
+        if not isinstance(row, dict):
+            continue
+        chat_id = str(row.get("chat_id") or "")
+        settings = row.get("settings")
+        updated = str(row.get("updated_at") or "")
+        if chat_id not in allowed or not isinstance(settings, dict) or not settings:
+            continue
+        previous = db.execute(
+            "SELECT updated FROM remote_settings_versions WHERE chat_id=?",
+            (chat_id,),
+        ).fetchone()
+        if previous and str(previous[0]) == updated:
+            continue
+        try:
+            apply_settings_dict(settings, db, chat_id)
+        except ValueError as exc:
+            print(
+                f"Настройки Mini App для {chat_id} отклонены: {exc}",
+                file=sys.stderr, flush=True,
+            )
+            continue
+        db.execute(
+            "INSERT OR REPLACE INTO remote_settings_versions (chat_id, updated) "
+            "VALUES (?, ?)",
+            (chat_id, updated),
+        )
+        db.commit()
+        applied += 1
+    return applied
 
 
 def authorize_chat(db, chat_id):

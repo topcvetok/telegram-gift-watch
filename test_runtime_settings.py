@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 from runtime_settings import (
     activate_settings,
@@ -19,6 +20,7 @@ from runtime_settings import (
     set_source_enabled,
     set_upgrade_backdrops,
     source_enabled,
+    sync_remote_settings,
 )
 
 
@@ -175,6 +177,37 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(
             effective_config(self.config, self.db, "guest")["max_lot_rub"], 2000
         )
+
+    def test_remote_mini_app_settings_are_applied_once_per_version(self):
+        activate_settings(self.db, "owner")
+        remote = {
+            "chat_id": "owner",
+            "history_api_url": "https://example.test/settings",
+            "history_writer_token": "writer-secret-which-is-long-enough",
+        }
+        rows = [{
+            "chat_id": "owner",
+            "updated_at": "2026-10-26T15:00:00Z",
+            "settings": {
+                "prices": {"max_lot": {"value": "25", "currency": "ton"}},
+                "sources": {"portals": False},
+                "features": {"dark_upgrades": False},
+                "numbers": {"daily_report_hour": 18},
+                "upgrade_backdrops": ["Azure Blue"],
+            },
+        }]
+        with (
+            patch("history_store.register_settings_profile", return_value=True),
+            patch("history_store.pull_settings_profiles", return_value=rows),
+        ):
+            self.assertEqual(sync_remote_settings(self.db, remote, force=True), 1)
+            self.assertEqual(sync_remote_settings(self.db, remote, force=True), 0)
+        current = effective_config(self.config, self.db, "owner")
+        self.assertEqual(current["max_lot_ton"], Decimal("25"))
+        self.assertFalse(current["portals_enabled"])
+        self.assertFalse(current["dark_upgrades_enabled"])
+        self.assertEqual(current["daily_report_hour"], 18)
+        self.assertEqual(current["upgrade_backdrops"], ["Azure Blue"])
 
 
 if __name__ == "__main__":

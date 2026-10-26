@@ -31,27 +31,60 @@ def ensure_outbox(db):
     db.commit()
 
 
-def _post(secrets, payload):
+def _request(secrets, payload, *, writer=False):
     endpoint = str(secrets.get("history_api_url") or "").strip()
-    writer = str(secrets.get("history_writer_token") or "").strip()
-    if not endpoint or not writer:
-        return False
+    writer_token = str(secrets.get("history_writer_token") or "").strip()
+    if not endpoint or (writer and not writer_token):
+        return None
+    headers = {
+        "content-type": "application/json",
+        "user-agent": "GiftWatch/1.0",
+    }
+    if writer:
+        headers["x-writer-token"] = writer_token
     request = urllib.request.Request(
         endpoint,
         data=json.dumps(payload, ensure_ascii=False, default=str).encode(),
         method="POST",
-        headers={
-            "content-type": "application/json",
-            "x-writer-token": writer,
-            "user-agent": "GiftWatch/1.0",
-        },
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(request, timeout=8) as response:
-            return response.status == 200
+            if response.status != 200:
+                return None
+            body = response.read()
+            if not isinstance(body, (str, bytes, bytearray)):
+                return {}
+            if isinstance(body, (bytes, bytearray)):
+                body = body.decode()
+            return json.loads(body) if body else {}
     except (OSError, urllib.error.URLError, urllib.error.HTTPError) as exc:
-        print(f"История Mini App временно недоступна: {exc}", file=sys.stderr, flush=True)
+        print(f"Backend Mini App временно недоступен: {exc}", file=sys.stderr, flush=True)
+        return None
+
+
+def _post(secrets, payload):
+    return _request(secrets, payload, writer=True) is not None
+
+
+def register_settings_profile(secrets, chat_id):
+    """Allow a tokenized Mini App link to manage one chat's settings."""
+    token = access_token(secrets, chat_id)
+    if not token:
         return False
+    result = _request(secrets, {
+        "action": "settings_register",
+        "chat_id": str(chat_id),
+        "access_token": token,
+    }, writer=True)
+    return isinstance(result, dict) and result.get("ok") is True
+
+
+def pull_settings_profiles(secrets):
+    """Return settings saved by Mini App, authenticated as the monitor."""
+    result = _request(secrets, {"action": "settings_sync"}, writer=True)
+    rows = result.get("profiles") if isinstance(result, dict) else None
+    return rows if isinstance(rows, list) else None
 
 
 def flush_outbox(db, secrets, limit=20):

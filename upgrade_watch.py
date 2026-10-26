@@ -570,7 +570,7 @@ def main():
     with sqlite3.connect(ROOT / "settings.sqlite3", timeout=5) as settings_db:
         settings_db.execute("PRAGMA journal_mode=WAL")
         settings_db.execute("PRAGMA busy_timeout=5000")
-        activate_settings(settings_db, secrets["chat_id"])
+        activate_settings(settings_db, secrets["chat_id"], secrets)
         with sqlite3.connect(ROOT / "state.sqlite3", timeout=30) as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA busy_timeout=30000")

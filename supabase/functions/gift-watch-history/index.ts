@@ -31,6 +31,11 @@ function clean(value: unknown, limit = 300) {
   return typeof value === "string" ? value.trim().slice(0, limit) : "";
 }
 
+function validSettings(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return JSON.stringify(value).length <= 50000;
+}
+
 async function rest(url: URL, init: RequestInit = {}) {
   const result = await fetch(url, {
     ...init,
@@ -55,6 +60,44 @@ Deno.serve(async (req: Request) => {
   try {
     if (req.method === "POST") {
       const input = await req.json();
+      if (input.action === "settings_read" || input.action === "settings_save") {
+        const token = clean(input.token, 200);
+        if (token.length < 32) {
+          return response(req, { error: "invalid token" }, 400);
+        }
+        const url = new URL(`${SUPABASE_URL}/rest/v1/gift_watch_settings`);
+        url.searchParams.set("access_hash", `eq.${await sha256(token)}`);
+        if (input.action === "settings_read") {
+          url.searchParams.set("select", "settings,updated_at");
+          url.searchParams.set("limit", "1");
+          const rows = await rest(url);
+          if (!Array.isArray(rows) || !rows.length) {
+            return response(req, { error: "unknown profile" }, 403);
+          }
+          return response(req, {
+            settings: rows[0].settings || {},
+            updated_at: rows[0].updated_at,
+          });
+        }
+        if (!validSettings(input.settings)) {
+          return response(req, { error: "invalid settings" }, 400);
+        }
+        const rows = await rest(url, {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            "prefer": "return=representation",
+          },
+          body: JSON.stringify({
+            settings: input.settings,
+            updated_at: new Date().toISOString(),
+          }),
+        });
+        if (!Array.isArray(rows) || !rows.length) {
+          return response(req, { error: "unknown profile" }, 403);
+        }
+        return response(req, { ok: true, updated_at: rows[0].updated_at });
+      }
       if (input.action === "read") {
         const token = clean(input.token, 200);
         const kind = clean(input.kind, 20);
@@ -86,6 +129,35 @@ Deno.serve(async (req: Request) => {
       const writer = req.headers.get("x-writer-token") || "";
       if (writer.length < 32 || await sha256(writer) !== WRITER_HASH) {
         return response(req, { error: "unauthorized" }, 401);
+      }
+      if (input.action === "settings_register") {
+        const chatId = clean(input.chat_id, 100);
+        const accessToken = clean(input.access_token, 200);
+        if (!chatId || accessToken.length < 32) {
+          return response(req, { error: "invalid profile" }, 400);
+        }
+        const url = new URL(`${SUPABASE_URL}/rest/v1/gift_watch_settings`);
+        url.searchParams.set("on_conflict", "chat_id");
+        await rest(url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "prefer": "resolution=merge-duplicates,return=minimal",
+          },
+          body: JSON.stringify({
+            chat_id: chatId,
+            access_hash: await sha256(accessToken),
+          }),
+        });
+        return response(req, { ok: true });
+      }
+      if (input.action === "settings_sync") {
+        const url = new URL(`${SUPABASE_URL}/rest/v1/gift_watch_settings`);
+        url.searchParams.set("select", "chat_id,settings,updated_at");
+        url.searchParams.set("order", "updated_at.asc");
+        url.searchParams.set("limit", "1000");
+        const rows = await rest(url);
+        return response(req, { profiles: Array.isArray(rows) ? rows : [] });
       }
       const kind = clean(input.kind, 20);
       const chatId = clean(input.chat_id, 100);

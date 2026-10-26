@@ -30,3 +30,17 @@ create index gift_watch_history_access_kind_created_idx
 
 comment on table public.gift_watch_history is
   'Private per-chat alert history, available only through the authenticated history Edge Function.';
+
+create table public.gift_watch_settings (
+  chat_id text primary key,
+  access_hash text not null unique,
+  settings jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.gift_watch_settings enable row level security;
+revoke all on table public.gift_watch_settings from anon, authenticated;
+
+comment on table public.gift_watch_settings is
+  'Durable per-chat monitor settings, available only through the authenticated Mini App Edge Function.';
