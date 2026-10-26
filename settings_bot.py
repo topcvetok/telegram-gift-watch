@@ -269,7 +269,7 @@ def run(config, secrets, db, duration=3300):
     deadline = time.monotonic() + max(1, int(duration))
     offset = None
     while time.monotonic() < deadline:
-        sync_remote_settings(db, secrets)
+        sync_remote_settings(db, secrets, interval=10)
         payload = {"timeout": 5, "limit": 20}
         if offset is not None:
             payload["offset"] = offset

@@ -258,7 +258,7 @@
     const validation=settingsError(settings);if(validation){status.textContent=validation;status.className='note error';return}
     if(new TextEncoder().encode(payload).length>48000){status.textContent='Списки слишком длинные для одного сохранения.';status.className='note error';return}
     save.disabled=true;status.textContent='Сохраняю…';status.className='note';
-    try{const response=await fetch(HISTORY_API,{method:'POST',headers:{'content-type':'application/json'},body:payload});if(!response.ok)throw new Error(String(response.status));localStorage.setItem('giftwatch_form_v2',JSON.stringify(settings));dirty.clear();status.textContent='Сохранено. Бот применит изменения в течение нескольких секунд.';tg&&tg.HapticFeedback&&tg.HapticFeedback.notificationOccurred('success')}catch(_){save.disabled=false;status.textContent='Не удалось сохранить. Попробуй ещё раз.';status.className='note error'}
+    try{const response=await fetch(HISTORY_API,{method:'POST',headers:{'content-type':'application/json'},body:payload});if(!response.ok)throw new Error(String(response.status));localStorage.setItem('giftwatch_form_v2',JSON.stringify(settings));dirty.clear();status.textContent='Сохранено. Бот применит изменения в течение 10 секунд.';tg&&tg.HapticFeedback&&tg.HapticFeedback.notificationOccurred('success')}catch(_){save.disabled=false;status.textContent='Не удалось сохранить. Попробуй ещё раз.';status.className='note error'}
   };
 </script>
 </body>

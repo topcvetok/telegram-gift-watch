@@ -95,8 +95,6 @@ def active_config(config):
     """Apply live settings when a production settings connection is active."""
     if _ACTIVE_SETTINGS_DB is None:
         return dict(config)
-    if _ACTIVE_REMOTE:
-        sync_remote_settings(_ACTIVE_SETTINGS_DB, _ACTIVE_REMOTE)
     return effective_config(config, _ACTIVE_SETTINGS_DB, _ACTIVE_OWNER_CHAT_ID)
 
 
@@ -104,8 +102,6 @@ def active_profiles(config):
     """Return (chat_id, config) pairs for every authorized recipient."""
     if _ACTIVE_SETTINGS_DB is None or _ACTIVE_OWNER_CHAT_ID is None:
         return [(None, dict(config))]
-    if _ACTIVE_REMOTE:
-        sync_remote_settings(_ACTIVE_SETTINGS_DB, _ACTIVE_REMOTE)
     return [
         (chat_id, effective_config(config, _ACTIVE_SETTINGS_DB, chat_id))
         for chat_id in recipient_chat_ids(_ACTIVE_SETTINGS_DB, _ACTIVE_OWNER_CHAT_ID)
