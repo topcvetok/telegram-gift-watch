@@ -29,7 +29,7 @@ FEATURE_LABELS = {
     "daily_report": "Ежедневный отчёт",
 }
 
-UPGRADE_BACKDROP_NAMES = (
+BACKDROP_NAMES = (
     "Black", "Onyx Black", "Gunmetal", "Battleship Grey", "Feldgrau",
     "Steel Grey", "Roman Silver", "Platinum", "Ivory White", "Desert Sand",
     "Cappuccino", "Seal Brown", "Chocolate", "Chestnut", "Rosewood",
@@ -47,7 +47,9 @@ UPGRADE_BACKDROP_NAMES = (
     "Purple", "Dark Lilac", "Fandango", "Mexican Pink", "Raspberry",
     "Mystic Pearl", "Strawberry", "Coral Red",
 )
+UPGRADE_BACKDROP_NAMES = BACKDROP_NAMES
 DEFAULT_UPGRADE_BACKDROPS = ("Black", "Onyx Black")
+DEFAULT_LISTING_BACKDROPS = ("Black", "Onyx Black", "Gunmetal", "Midnight Blue")
 NUMBER_SETTING_LABELS = {
     "beautiful_number_max_distinct_digits": "максимум разных цифр в номере",
     "monochrome_min_score": "минимальное совпадение монохрома",
@@ -174,7 +176,7 @@ def effective_config(config, db, chat_id=None):
         + tuple(f"{source}_enabled" for source in SOURCE_LABELS)
         + tuple(f"{feature}_enabled" for feature in FEATURE_LABELS)
         + tuple(NUMBER_SETTING_LABELS)
-        + ("upgrade_backdrops",)
+        + ("upgrade_backdrops", "listing_backdrops")
     )
     rows = db.execute(
         f"SELECT key, value FROM runtime_settings_by_chat "
@@ -205,17 +207,17 @@ def effective_config(config, db, chat_id=None):
     for key, label in NUMBER_SETTING_LABELS.items():
         if key in stored:
             result[key] = _integer_setting(key, stored[key], label)
-    if "upgrade_backdrops" in stored:
-        try:
-            values = json.loads(stored["upgrade_backdrops"])
-            result["upgrade_backdrops"] = canonical_upgrade_backdrops(values)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            values = list(DEFAULT_UPGRADE_BACKDROPS)
-            result["upgrade_backdrops"] = values
-    else:
-        result["upgrade_backdrops"] = canonical_upgrade_backdrops(
-            result.get("upgrade_backdrops", DEFAULT_UPGRADE_BACKDROPS)
-        )
+    for key, default, canonical in (
+        ("upgrade_backdrops", DEFAULT_UPGRADE_BACKDROPS, canonical_upgrade_backdrops),
+        ("listing_backdrops", DEFAULT_LISTING_BACKDROPS, canonical_listing_backdrops),
+    ):
+        if key in stored:
+            try:
+                result[key] = canonical(json.loads(stored[key]))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                result[key] = list(default)
+        else:
+            result[key] = canonical(result.get(key, default))
     result["filter_lists"] = filter_lists(db, chat_id)
     return result
 
@@ -379,9 +381,17 @@ def set_number_setting(db, key, value, *, chat_id=None):
 
 
 def canonical_upgrade_backdrops(values):
+    return canonical_backdrops(values, "Цвета улучшений")
+
+
+def canonical_listing_backdrops(values):
+    return canonical_backdrops(values, "Цвета офферов")
+
+
+def canonical_backdrops(values, label):
     if not isinstance(values, (list, tuple)):
-        raise ValueError("Цвета улучшений должны быть списком")
-    canonical = {normalize_filter_value(name): name for name in UPGRADE_BACKDROP_NAMES}
+        raise ValueError(f"{label} должны быть списком")
+    canonical = {normalize_filter_value(name): name for name in BACKDROP_NAMES}
     result = []
     seen = set()
     for value in values:
@@ -400,6 +410,18 @@ def set_upgrade_backdrops(db, values, *, chat_id=None):
     db.execute(
         "INSERT OR REPLACE INTO runtime_settings_by_chat "
         "(chat_id, key, value, updated) VALUES (?, 'upgrade_backdrops', ?, unixepoch())",
+        (_profile(chat_id), json.dumps(selected, ensure_ascii=False)),
+    )
+    db.commit()
+    return selected
+
+
+def set_listing_backdrops(db, values, *, chat_id=None):
+    selected = canonical_listing_backdrops(values)
+    ensure_settings_table(db, _ACTIVE_OWNER_CHAT_ID)
+    db.execute(
+        "INSERT OR REPLACE INTO runtime_settings_by_chat "
+        "(chat_id, key, value, updated) VALUES (?, 'listing_backdrops', ?, unixepoch())",
         (_profile(chat_id), json.dumps(selected, ensure_ascii=False)),
     )
     db.commit()
@@ -448,6 +470,8 @@ def apply_settings_dict(settings, db, chat_id=None):
             set_number_setting(db, key, value, chat_id=chat_id)
     if "upgrade_backdrops" in settings:
         set_upgrade_backdrops(db, settings["upgrade_backdrops"], chat_id=chat_id)
+    if "listing_backdrops" in settings:
+        set_listing_backdrops(db, settings["listing_backdrops"], chat_id=chat_id)
     if "filters" in settings:
         replace_filters(db, settings.get("filters") or {}, chat_id=chat_id)
     return True

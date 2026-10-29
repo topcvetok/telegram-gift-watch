@@ -51,6 +51,14 @@
   </section>
 
   <section class="card">
+    <h2>Цвета фона офферов</h2>
+    <p class="note">Эти цвета могут быть основанием для покупки на Tonnel, Portals и MRKT. Настройка не влияет на улучшения внутри Telegram.</p>
+    <input id="listing_backdrop_search" type="search" placeholder="Найти цвет">
+    <div class="backdrop-actions"><button id="listing_backdrops_all" class="minor" type="button">Выбрать все</button><button id="listing_backdrops_none" class="minor" type="button">Очистить</button></div>
+    <div id="listing_backdrops" class="backdrop-grid"></div>
+  </section>
+
+  <section class="card">
     <h2>Улучшения внутри Telegram</h2>
     <div class="row"><label>Выбранные цвета фона<span class="sub">Уведомлять, если выпал один из отмеченных цветов</span></label><label class="switch"><input id="feature_dark_upgrades" type="checkbox" checked><span class="slider"></span></label></div>
     <input id="backdrop_search" type="search" placeholder="Найти цвет">
@@ -106,8 +114,10 @@
   const HISTORY_API='https://tekqdsrukdaijmdpafpi.supabase.co/functions/v1/gift-watch-history';
   const fragment=new URLSearchParams(location.hash.slice(1));
   let historyToken=fragment.get('history')||localStorage.getItem('giftwatch_history_token')||'';
-  if(historyToken){localStorage.setItem('giftwatch_history_token',historyToken);if(tg&&tg.CloudStorage)tg.CloudStorage.setItem('giftwatch_history_token',historyToken,()=>{});history.replaceState(null,'',location.pathname+location.search)}
-  else if(tg&&tg.CloudStorage)tg.CloudStorage.getItem('giftwatch_history_token',(err,value)=>{if(!err&&value){historyToken=value;localStorage.setItem('giftwatch_history_token',value)}});
+  function cloudStorageSet(key,value){try{if(tg&&tg.CloudStorage)tg.CloudStorage.setItem(key,value,()=>{})}catch(_){}}
+  function cloudStorageGet(key,callback){try{if(tg&&tg.CloudStorage)tg.CloudStorage.getItem(key,callback)}catch(_){}}
+  if(historyToken){localStorage.setItem('giftwatch_history_token',historyToken);cloudStorageSet('giftwatch_history_token',historyToken);history.replaceState(null,'',location.pathname+location.search)}
+  else cloudStorageGet('giftwatch_history_token',(err,value)=>{if(!err&&value){historyToken=value;localStorage.setItem('giftwatch_history_token',value)}});
   const BACKDROPS = [
     'Black','Onyx Black','Gunmetal','Battleship Grey','Feldgrau','Steel Grey','Roman Silver','Platinum','Ivory White','Desert Sand',
     'Cappuccino','Seal Brown','Chocolate','Chestnut','Rosewood','Burgundy','Carmine','Fire Engine','Tomato','Burnt Sienna','Copper',
@@ -140,6 +150,7 @@
     'Tomato':['#e6793e','#d44e3f'],'Fire Engine':['#f05f4f','#c43949'],'Celtic Blue':['#45b8ed','#3886d9'],'Old Gold':['#b58d38','#946925'],
     'Burnt Sienna':['#d66f3c','#b54b2d'],'Carmine':['#e0574a','#a8383b'],'Mustard':['#d4980d','#c47712'],'French Violet':['#c260e6','#914ed9']
   };
+  let listingBackdropSelection = new Set(['Black','Onyx Black','Gunmetal','Midnight Blue']);
   let backdropSelection = new Set(['Black','Onyx Black']);
   const dirty = new Set();
   const stateIds = [
@@ -185,7 +196,7 @@
   document.querySelectorAll('.nav-button').forEach(button=>button.onclick=()=>showView(button.dataset.view));document.querySelectorAll('[data-reload]').forEach(button=>button.onclick=()=>loadHistory(button.dataset.reload,true));document.querySelectorAll('[data-more]').forEach(button=>button.onclick=()=>loadHistory(button.dataset.more,false,true));
   function mark(group){ dirty.add(group); save.disabled=false; }
   document.querySelectorAll('input,select,textarea').forEach(el => {
-    if(el.id==='backdrop_search')return;
+    if(el.id==='backdrop_search'||el.id==='listing_backdrop_search')return;
     el.addEventListener('change', () => mark(el.id.includes('_allow')||el.id.includes('_deny') ? 'filters' : el.id));
     if (el.tagName==='TEXTAREA' || ['max_lot','min_floor','upgrade_min_floor'].includes(el.id)) el.addEventListener('input', () => mark(el.id.includes('_allow')||el.id.includes('_deny') ? 'filters' : el.id));
   });
@@ -197,35 +208,39 @@
   document.getElementById('beautiful_number_minus').onclick=()=>stepBeautifulNumber(-1);
   document.getElementById('beautiful_number_plus').onclick=()=>stepBeautifulNumber(1);
   function lines(id){return [...new Set(document.getElementById(id).value.split('\n').map(x=>x.trim()).filter(Boolean))];}
-  function renderBackdrops(){
-    const query=document.getElementById('backdrop_search').value.trim().toLocaleLowerCase();
-    const root=document.getElementById('upgrade_backdrops');root.textContent='';
+  function renderBackdropPicker(searchId,rootId,selection,settingKey){
+    const query=document.getElementById(searchId).value.trim().toLocaleLowerCase();
+    const root=document.getElementById(rootId);root.textContent='';
     BACKDROPS.filter(name=>name.toLocaleLowerCase().includes(query)).forEach(name=>{
       const label=document.createElement('label');label.className='backdrop-option';
-      const input=document.createElement('input');input.type='checkbox';input.checked=backdropSelection.has(name);
-      input.addEventListener('change',()=>{input.checked?backdropSelection.add(name):backdropSelection.delete(name);mark('upgrade_backdrops')});
+      const input=document.createElement('input');input.type='checkbox';input.checked=selection.has(name);
+      input.addEventListener('change',()=>{input.checked?selection.add(name):selection.delete(name);mark(settingKey)});
       const swatch=document.createElement('span');swatch.className='backdrop-swatch';swatch.setAttribute('aria-hidden','true');
       const palette=BACKDROP_PALETTES[name]||['#777','#444'];
       swatch.style.background=`radial-gradient(circle at 35% 30%,${palette[0]} 0 38%,${palette[1]} 100%)`;
       label.append(input,swatch,document.createTextNode(name));root.append(label);
     });
   }
-  function snapshot(){const out={};stateIds.forEach(id=>{const e=document.getElementById(id);out[id]=e.type==='checkbox'?e.checked:e.value});out.upgrade_backdrops=[...backdropSelection];return out;}
-  function restore(raw){try{const data=JSON.parse(raw||'{}');stateIds.forEach(id=>{if(!(id in data))return;const e=document.getElementById(id);if(e.type==='checkbox')e.checked=!!data[id];else e.value=data[id]});if(Array.isArray(data.upgrade_backdrops))backdropSelection=new Set(data.upgrade_backdrops.filter(x=>BACKDROPS.includes(x)));renderBackdrops();}catch(_){}}
+  function renderBackdrops(){renderBackdropPicker('listing_backdrop_search','listing_backdrops',listingBackdropSelection,'listing_backdrops');renderBackdropPicker('backdrop_search','upgrade_backdrops',backdropSelection,'upgrade_backdrops')}
+  function snapshot(){const out={};stateIds.forEach(id=>{const e=document.getElementById(id);out[id]=e.type==='checkbox'?e.checked:e.value});out.listing_backdrops=[...listingBackdropSelection];out.upgrade_backdrops=[...backdropSelection];return out;}
+  function restore(raw){try{const data=JSON.parse(raw||'{}');stateIds.forEach(id=>{if(!(id in data))return;const e=document.getElementById(id);if(e.type==='checkbox')e.checked=!!data[id];else e.value=data[id]});if(Array.isArray(data.listing_backdrops))listingBackdropSelection=new Set(data.listing_backdrops.filter(x=>BACKDROPS.includes(x)));if(Array.isArray(data.upgrade_backdrops))backdropSelection=new Set(data.upgrade_backdrops.filter(x=>BACKDROPS.includes(x)));renderBackdrops();}catch(_){}}
+  document.getElementById('listing_backdrop_search').addEventListener('input',renderBackdrops);
   document.getElementById('backdrop_search').addEventListener('input',renderBackdrops);
+  document.getElementById('listing_backdrops_all').onclick=()=>{listingBackdropSelection=new Set(BACKDROPS);renderBackdrops();mark('listing_backdrops')};
+  document.getElementById('listing_backdrops_none').onclick=()=>{listingBackdropSelection.clear();renderBackdrops();mark('listing_backdrops')};
   document.getElementById('backdrops_all').onclick=()=>{backdropSelection=new Set(BACKDROPS);renderBackdrops();mark('upgrade_backdrops')};
   document.getElementById('backdrops_none').onclick=()=>{backdropSelection.clear();renderBackdrops();mark('upgrade_backdrops')};
   const DEFAULT_SETTINGS={
     prices:{max_lot:{value:'2000',currency:'rub'},min_floor:{value:'1000',currency:'rub'},upgrade_min_floor:{value:'10',currency:'ton'}},
     sources:{tonnel:true,portals:true,mrkt:true},
     features:{collection_basis:false,model_basis:true,backdrop_basis:true,beautiful_number:true,monochrome:true,dark_upgrades:true,valuable_upgrades:true,daily_report:true},
-    numbers:{daily_report_hour:21,beautiful_number_max_distinct_digits:3},upgrade_backdrops:['Black','Onyx Black'],
+    numbers:{daily_report_hour:21,beautiful_number_max_distinct_digits:3},listing_backdrops:['Black','Onyx Black','Gunmetal','Midnight Blue'],upgrade_backdrops:['Black','Onyx Black'],
     filters:{collections:{allow:[],deny:[]},models:{allow:[],deny:[]},backdrops:{allow:[],deny:[]}}
   };
   function mergedSettings(value){
     const data=value&&typeof value==='object'?value:{};const filters={};
     for(const scope of ['collections','models','backdrops'])filters[scope]={...DEFAULT_SETTINGS.filters[scope],...((data.filters||{})[scope]||{})};
-    return {prices:{...DEFAULT_SETTINGS.prices,...(data.prices||{})},sources:{...DEFAULT_SETTINGS.sources,...(data.sources||{})},features:{...DEFAULT_SETTINGS.features,...(data.features||{})},numbers:{...DEFAULT_SETTINGS.numbers,...(data.numbers||{})},upgrade_backdrops:Array.isArray(data.upgrade_backdrops)?data.upgrade_backdrops:DEFAULT_SETTINGS.upgrade_backdrops,filters};
+    return {prices:{...DEFAULT_SETTINGS.prices,...(data.prices||{})},sources:{...DEFAULT_SETTINGS.sources,...(data.sources||{})},features:{...DEFAULT_SETTINGS.features,...(data.features||{})},numbers:{...DEFAULT_SETTINGS.numbers,...(data.numbers||{})},listing_backdrops:Array.isArray(data.listing_backdrops)?data.listing_backdrops:DEFAULT_SETTINGS.listing_backdrops,upgrade_backdrops:Array.isArray(data.upgrade_backdrops)?data.upgrade_backdrops:DEFAULT_SETTINGS.upgrade_backdrops,filters};
   }
   function applySettings(value){
     const settings=mergedSettings(value);
@@ -234,12 +249,13 @@
     for(const name of ['collection_basis','model_basis','backdrop_basis','beautiful_number','monochrome','dark_upgrades','valuable_upgrades','daily_report'])document.getElementById('feature_'+name).checked=settings.features[name]!==false;
     document.getElementById('daily_report_hour').value=settings.numbers.daily_report_hour;
     document.getElementById('beautiful_number_max_distinct_digits').value=settings.numbers.beautiful_number_max_distinct_digits;
+    listingBackdropSelection=new Set(settings.listing_backdrops.filter(x=>BACKDROPS.includes(x)));
     backdropSelection=new Set(settings.upgrade_backdrops.filter(x=>BACKDROPS.includes(x)));
     for(const scope of ['collections','models','backdrops'])for(const mode of ['allow','deny'])document.getElementById(scope+'_'+mode).value=(settings.filters[scope][mode]||[]).join('\n');
     renderBackdrops();dirty.clear();save.disabled=true;
   }
   function currentSettings(){
-    const settings={prices:{},sources:{},features:{},numbers:{},upgrade_backdrops:[...backdropSelection],filters:{}};
+    const settings={prices:{},sources:{},features:{},numbers:{},listing_backdrops:[...listingBackdropSelection],upgrade_backdrops:[...backdropSelection],filters:{}};
     for(const name of ['max_lot','min_floor','upgrade_min_floor'])settings.prices[name]={value:document.getElementById(name).value.trim().replace(',','.'),currency:name==='upgrade_min_floor'?'ton':document.getElementById(name+'_currency').value};
     for(const name of ['tonnel','portals','mrkt'])settings.sources[name]=document.getElementById('source_'+name).checked;
     for(const name of ['collection_basis','model_basis','backdrop_basis','beautiful_number','monochrome','dark_upgrades','valuable_upgrades','daily_report'])settings.features[name]=document.getElementById('feature_'+name).checked;

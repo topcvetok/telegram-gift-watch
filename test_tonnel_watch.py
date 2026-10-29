@@ -165,6 +165,22 @@ class TonnelScoringTests(unittest.TestCase):
             with self.subTest(backdrop=backdrop):
                 self.assertTrue(watch.allowed_backdrop(backdrop))
 
+    def test_listing_backdrops_can_be_selected_per_profile(self):
+        config = dict(self.config, listing_backdrops=["Azure Blue"])
+        self.assertTrue(watch.allowed_backdrop("Azure Blue (0.5%)", config))
+        self.assertFalse(watch.allowed_backdrop("Black", config))
+        item = gift(1, 5.0, backdrop="Azure Blue (0.5%)")
+        book = [
+            gift(i, price, backdrop="Azure Blue (0.5%)")
+            for i, price in enumerate([7.0, 7.1, 7.2, 7.3], 20)
+        ]
+        result = watch.best_score(
+            item, [], {("backdrop", "Azure Blue (0.5%)"): book},
+            Decimal("124.42"), dict(config, collection_basis_enabled=False),
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["basis"], "фон: Azure Blue (0.5%)")
+
     def test_collection_model_and_backdrop_bases_can_be_disabled(self):
         collection_item = gift(1, 2.5)
         disabled_collection = dict(self.config, collection_basis_enabled=False)

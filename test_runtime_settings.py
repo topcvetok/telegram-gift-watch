@@ -16,6 +16,7 @@ from runtime_settings import (
     replace_filters,
     set_feature_enabled,
     set_number_setting,
+    set_listing_backdrops,
     set_setting,
     set_source_enabled,
     set_upgrade_backdrops,
@@ -101,6 +102,21 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(profiles["owner"]["upgrade_min_floor_ton"], Decimal("10.5"))
         self.assertEqual(profiles["owner"]["upgrade_backdrops"], ["Azure Blue", "Black"])
         self.assertEqual(profiles["guest"]["upgrade_backdrops"], ["Coral Red"])
+
+    def test_listing_backdrops_are_persistent_and_separate_from_upgrades(self):
+        activate_settings(self.db, "owner")
+        authorize_chat(self.db, "guest")
+        set_listing_backdrops(
+            self.db, ["Azure Blue", "Coral Red"], chat_id="owner"
+        )
+        set_listing_backdrops(self.db, ["Black"], chat_id="guest")
+        set_upgrade_backdrops(self.db, ["Onyx Black"], chat_id="owner")
+        profiles = dict(active_profiles(self.config))
+        self.assertEqual(
+            profiles["owner"]["listing_backdrops"], ["Azure Blue", "Coral Red"]
+        )
+        self.assertEqual(profiles["guest"]["listing_backdrops"], ["Black"])
+        self.assertEqual(profiles["owner"]["upgrade_backdrops"], ["Onyx Black"])
 
     def test_special_threshold_ranges_are_validated(self):
         with self.assertRaisesRegex(ValueError, "от 1 до 10"):

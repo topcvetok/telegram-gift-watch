@@ -626,7 +626,10 @@ def process_listing(item, config, secrets, db, session, token, send=True):
         feature_enabled(user_config, "backdrop_basis")
         for _, user_config in profiles
     )
-    if needs_backdrop and allowed_backdrop(item.get("backdrop")):
+    if needs_backdrop and any(
+        allowed_backdrop(item.get("backdrop"), user_config)
+        for _, user_config in profiles
+    ):
         variant_books[("backdrop", item["backdrop"])] = cached_book(
             db, session, token, collection=item["name"],
             collection_id=item.get("collection_id") or None,

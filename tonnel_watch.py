@@ -62,11 +62,28 @@ def decimal(value, label="число"):
     return result
 
 
-def allowed_backdrop(value):
+def allowed_backdrop(value, config=None):
     if not isinstance(value, str):
         return False
     name = re.sub(r"\s*\([^)]*%\)\s*$", "", value).strip().casefold()
-    return name in ALLOWED_BACKDROP_NAMES
+    selected = (config or {}).get("listing_backdrops", ALLOWED_BACKDROP_NAMES)
+    allowed = {str(item).strip().casefold() for item in selected}
+    return name in allowed
+
+
+def listing_backdrop_config(config, profiles):
+    """Build a floor-book config covering every active user's selected colors."""
+    result = dict(config)
+    selected = []
+    seen = set()
+    for _, user_config in profiles:
+        for value in user_config.get("listing_backdrops", ALLOWED_BACKDROP_NAMES):
+            normalized = str(value).strip().casefold()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                selected.append(value)
+    result["listing_backdrops"] = selected
+    return result
 
 
 def request(method, url, *, body=None, params=None, attempts=3):
@@ -138,7 +155,7 @@ def load_variant_books(
             scope in ("model", "backdrop")
             and isinstance(trait, str)
             and trait.strip()
-            and (scope != "backdrop" or allowed_backdrop(trait))
+            and (scope != "backdrop" or allowed_backdrop(trait, config))
             and key not in seen
         ):
             seen.add(key)
@@ -151,7 +168,7 @@ def load_variant_books(
             continue
         for scope in ("model", "backdrop"):
             trait = item.get(scope)
-            if scope == "backdrop" and not allowed_backdrop(trait):
+            if scope == "backdrop" and not allowed_backdrop(trait, config):
                 continue
             key = (scope, trait)
             if isinstance(trait, str) and trait.strip() and key not in seen:
@@ -357,7 +374,7 @@ def best_score(item, collection_book, variant_books, rate, config):
     monochrome_result = None
     for scope, label in labels.items():
         trait = item.get(scope)
-        if scope == "backdrop" and not allowed_backdrop(trait):
+        if scope == "backdrop" and not allowed_backdrop(trait, config):
             continue
         book = variant_books.get((scope, trait))
         if not book:
@@ -738,8 +755,9 @@ def process_event(event, config, secrets, db, send=True):
         ]
         if eligible_profiles:
             floor_book = load_collection_book(db, item["name"], config)
+            book_config = listing_backdrop_config(config, eligible_profiles)
             variant_books = load_variant_books(
-                db, item["name"], [item], rate, config,
+                db, item["name"], [item], rate, book_config,
                 [int(config.get("variant_query_budget_per_event", 1))],
             )
             for chat_id, user_config in eligible_profiles:
@@ -867,6 +885,7 @@ def run_cycle(config, secrets, db, send=False):
     db.execute("CREATE TABLE IF NOT EXISTS tonnel_alerts (id TEXT PRIMARY KEY, price TEXT, sent REAL)")
     total = candidates = delivered = 0
     variant_query_budget = [int(config["variant_query_budget_per_cycle"])]
+    book_config = listing_backdrop_config(config, profiles)
     for index, collection in enumerate(config["tonnel_collections"]):
         try:
             floor_book = load_collection_book(db, collection, config)
@@ -877,7 +896,7 @@ def run_cycle(config, secrets, db, send=False):
                 int(config["latest_limit"]),
             )
             variant_books = load_variant_books(
-                db, collection, newest, rate, config, variant_query_budget
+                db, collection, newest, rate, book_config, variant_query_budget
             )
             total += len(newest)
             for item in newest:
