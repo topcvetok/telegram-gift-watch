@@ -28,6 +28,37 @@ def raw_gift(gift_id="g1", price=10_000_000_000, **changes):
     return value
 
 
+def swift_row(gift_id="g1", price="10", event_id="listing-1", **changes):
+    value = {
+        "provider": "mrkt",
+        "giftId": gift_id,
+        "seller_price_ton": float(price),
+        "webapp_url": f"https://t.me/mrkt/app?startapp=gift{gift_id}",
+        "normalized": {
+            "gift": {
+                "id": gift_id, "collection": "Evil Eye", "number": 42,
+                "slug": "evileye-42", "telegram_url": "https://t.me/nft/evileye-42",
+                "image_url": "https://example.test/gift.png",
+                "webapp_url": f"https://t.me/mrkt/app?startapp=gift{gift_id}",
+                "attributes": {
+                    "model": {"name": "Watcher"},
+                    "backdrop": {"name": "Onyx Black"},
+                    "symbol": {"name": "Moon"},
+                },
+                "minted": True, "on_sale": True, "premarket": False,
+            },
+            "price": {
+                "currency": "TON", "basis": "listing_ask", "ton": float(price),
+                "nano": str(int(Decimal(price) * Decimal("1000000000"))),
+                "total_ton": float(price), "seller_ton": float(price),
+            },
+            "market": {"provider": "mrkt", "event_id": event_id, "event_type": "listing"},
+        },
+    }
+    value.update(changes)
+    return value
+
+
 class MrktTests(unittest.TestCase):
     def setUp(self):
         self.config = {
@@ -59,11 +90,13 @@ class MrktTests(unittest.TestCase):
 
     def test_current_api_contract(self):
         query = watch.listing_query(collection="Evil Eye", model="Watcher")
-        self.assertEqual(query["collectionNames"], ["Evil Eye"])
-        self.assertEqual(query["modelNames"], ["Watcher"])
-        self.assertTrue(query["lowToHigh"])
-        self.assertEqual(query["ordering"], "Price")
-        self.assertEqual(list(watch.EVENT_TYPES), ["Sale", "Listing", "ChangePrice"])
+        self.assertEqual(query["collections"], ["Evil Eye"])
+        self.assertEqual(query["models"], ["Watcher"])
+        self.assertEqual(query["market"], ["mrkt"])
+        self.assertEqual(query["sort_by"], "price asc")
+        self.assertEqual(list(watch.EVENT_TYPES), ["buy", "listing", "change_price"])
+        self.assertEqual(watch.headers("partner-key")["x-api-key"], "partner-key")
+        self.assertNotIn("authorization", watch.headers("partner-key"))
 
     def test_parses_listing_price_and_traits(self):
         item = watch.mrkt_item(raw_gift())
@@ -150,13 +183,16 @@ class MrktTests(unittest.TestCase):
     def test_fetch_book_maps_api_response(self):
         session = Mock()
         response = Mock(status_code=200)
-        response.json.return_value = {"gifts": [raw_gift()]}
+        response.json.return_value = {"items": [swift_row()], "meta": {}}
         session.request.return_value = response
         book = watch.fetch_book(session, "token", collection="Evil Eye")
         self.assertEqual(book[0]["price"], Decimal("10"))
         body = session.request.call_args.kwargs["json"]
-        self.assertEqual(body["collectionNames"], ["Evil Eye"])
-        self.assertEqual(session.request.call_args.args[1], watch.API_URL + "/gifts/saling")
+        self.assertEqual(body["collections"], ["Evil Eye"])
+        self.assertEqual(
+            session.request.call_args.args[1],
+            watch.API_URL + "/api/aggregator?page=0&limit=20",
+        )
 
     def test_listing_event_is_scored_sent_and_deduplicated(self):
         db = sqlite3.connect(":memory:")
@@ -200,7 +236,7 @@ class MrktTests(unittest.TestCase):
 
     def test_fail_fast_requires_token(self):
         db = sqlite3.connect(":memory:")
-        with self.assertRaisesRegex(RuntimeError, "MRKT_TOKEN"):
+        with self.assertRaisesRegex(RuntimeError, "SWIFT_API_KEY"):
             watch.run(self.config, {}, db, duration=1, fail_fast=True)
 
 

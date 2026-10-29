@@ -343,8 +343,8 @@ def lowest_book_floor(book):
 
 
 def collection_floor_ton(db, collection, config, secrets=None):
-    """Prefer MRKT collection floor and fall back to Tonnel."""
-    token = str((secrets or {}).get("mrkt_token") or "").strip()
+    """Prefer MRKT via the Swift partner API and fall back to Tonnel."""
+    token = str((secrets or {}).get("swift_api_key") or "").strip()
     if token:
         try:
             from mrkt_watch import cached_book as mrkt_cached_book

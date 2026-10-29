@@ -154,7 +154,7 @@ class UpgradeWatchTests(unittest.TestCase):
                 patch.object(watch, "load_collection_book") as tonnel:
             self.assertEqual(
                 watch.collection_floor_ton(
-                    db, "Plush Pepe", {}, {"mrkt_token": "token"}
+                    db, "Plush Pepe", {}, {"swift_api_key": "token"}
                 ),
                 (Decimal("9.5"), "MRKT"),
             )

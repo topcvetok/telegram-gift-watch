@@ -116,8 +116,8 @@ class PortalsTests(unittest.TestCase):
                     watch, "collection_stats", return_value={"sales_24h_count": 5},
                 ):
             enriched = watch.add_portals_floor(
-                item, result, self.config, {"mrkt_token": "token"}, db,
-                portals_session=Mock(), mrkt_session=Mock(),
+                item, result, self.config, {"swift_api_key": "token"}, db,
+                portals_session=Mock(), swift_session=Mock(),
             )
         self.assertEqual(
             [
@@ -286,6 +286,22 @@ class PortalsTests(unittest.TestCase):
         with patch.object(watch, "fetch_listings") as fetch:
             self.assertEqual(watch.run_cycle(config, {}, db, Mock(), send=False), 0)
         fetch.assert_not_called()
+
+    def test_rate_limit_stops_cycle_after_first_failed_candidate(self):
+        db = sqlite3.connect(":memory:")
+        items = [
+            watch.portals_item(raw_gift("g1")),
+            watch.portals_item(raw_gift("g2")),
+        ]
+        with patch.object(watch, "fetch_listings", return_value=items), \
+                patch.object(watch, "refresh_sold_alerts", return_value=0), \
+                patch.object(
+                    watch, "process_listing",
+                    side_effect=watch.PortalsRateLimited(30),
+                ) as process:
+            with self.assertRaises(watch.PortalsRateLimited):
+                watch.run_cycle(self.config, {}, db, Mock(), send=False)
+        self.assertEqual(process.call_count, 1)
 
     def test_sold_listing_edits_its_alert(self):
         db = sqlite3.connect(":memory:")

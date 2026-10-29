@@ -24,7 +24,8 @@ from market_data import (
     record_market_activity,
 )
 from runtime_settings import (
-    activate_settings, active_profiles, item_allowed, source_enabled, threshold_ton,
+    activate_settings, active_profiles, feature_enabled, item_allowed,
+    source_enabled, threshold_ton,
 )
 from special_traits import apply_special_bases
 from tonnel_watch import (
@@ -43,6 +44,8 @@ from tonnel_watch import (
 
 API_URL = "https://portal-market.com/api"
 APP_URL = "https://t.me/portals/market"
+PORTALS_REQUEST_INTERVAL = 1.2
+_LAST_PORTALS_REQUEST = 0.0
 
 
 class PortalsRateLimited(RuntimeError):
@@ -64,15 +67,20 @@ def headers(token=""):
 
 
 def request(session, path, *, params=None, token="", attempts=1):
+    global _LAST_PORTALS_REQUEST
     last_status = None
     for attempt in range(attempts):
         try:
+            wait = PORTALS_REQUEST_INTERVAL - (time.monotonic() - _LAST_PORTALS_REQUEST)
+            if wait > 0:
+                time.sleep(wait)
             response = session.get(
                 API_URL + path,
                 params=params,
                 headers=headers(token),
                 timeout=8,
             )
+            _LAST_PORTALS_REQUEST = time.monotonic()
             last_status = response.status_code
             if response.status_code == 200:
                 return response.json()
@@ -421,7 +429,8 @@ def mrkt_model_floor(item, config, db, session, token):
 
 def add_portals_floor(
         item, result, config, secrets, db, *, base_market="Tonnel",
-        portals_session=None, portals_token=None, mrkt_session=None, mrkt_token=None):
+        portals_session=None, portals_token=None, swift_session=None,
+        swift_api_key=None):
     """Attach exact-model floors from every available marketplace."""
     if result is None:
         return None
@@ -463,7 +472,7 @@ def add_portals_floor(
         collect_portals(portals_session)
 
     token = str(
-        mrkt_token if mrkt_token is not None else secrets.get("mrkt_token", "")
+        swift_api_key if swift_api_key is not None else secrets.get("swift_api_key", "")
     ).strip()
     if token:
         from mrkt_watch import MrktAuthError, MrktRateLimited
@@ -477,11 +486,11 @@ def add_portals_floor(
             except (RuntimeError, MrktAuthError, MrktRateLimited):
                 pass
 
-        if mrkt_session is None:
+        if swift_session is None:
             with requests.Session(impersonate="chrome") as session:
                 collect_mrkt(session)
         else:
-            collect_mrkt(mrkt_session)
+            collect_mrkt(swift_session)
 
     enriched["market_floors"] = floors
     enriched = complete_market_floors(item, enriched, db, config)
@@ -594,18 +603,30 @@ def process_listing(item, config, secrets, db, session, token, send=True):
     ]
     if not profiles:
         return 0
-    collection_book = cached_book(
-        db, session, token, collection=item["name"],
-        collection_id=item.get("collection_id") or None, config=config
-    )
+    collection_book = []
+    if any(feature_enabled(user_config, "collection_basis") for _, user_config in profiles):
+        collection_book = cached_book(
+            db, session, token, collection=item["name"],
+            collection_id=item.get("collection_id") or None, config=config
+        )
     variant_books = {}
-    if item.get("model"):
+    needs_model = any(
+        feature_enabled(user_config, "model_basis")
+        or feature_enabled(user_config, "beautiful_number")
+        or feature_enabled(user_config, "monochrome")
+        for _, user_config in profiles
+    )
+    if item.get("model") and needs_model:
         variant_books[("model", item["model"])] = cached_book(
             db, session, token, collection=item["name"],
             collection_id=item.get("collection_id") or None,
             model=item["model"], config=config
         )
-    if allowed_backdrop(item.get("backdrop")):
+    needs_backdrop = any(
+        feature_enabled(user_config, "backdrop_basis")
+        for _, user_config in profiles
+    )
+    if needs_backdrop and allowed_backdrop(item.get("backdrop")):
         variant_books[("backdrop", item["backdrop"])] = cached_book(
             db, session, token, collection=item["name"],
             collection_id=item.get("collection_id") or None,
@@ -645,6 +666,7 @@ def run_cycle(config, secrets, db, session, token="", send=True):
     )
     delivered = 0
     checked = 0
+    rate_limit = None
     for item in reversed(latest):
         key = str(item["gift_id"])
         old = db.execute("SELECT price FROM portals_seen WHERE id=?", (key,)).fetchone()
@@ -669,6 +691,10 @@ def run_cycle(config, secrets, db, session, token="", send=True):
         try:
             delivered += int(process_listing(item, config, secrets, db, session, token, send))
             processed = True
+        except PortalsRateLimited as exc:
+            rate_limit = exc
+            print(f"Portals {key}: {exc}", file=sys.stderr, flush=True)
+            break
         except (RuntimeError, ValueError, KeyError, TypeError) as exc:
             print(f"Portals {key}: {exc}", file=sys.stderr, flush=True)
         if processed:
@@ -678,6 +704,8 @@ def run_cycle(config, secrets, db, session, token="", send=True):
             )
     db.execute("DELETE FROM portals_seen WHERE processed < ?", (time.time() - 8 * 86400,))
     db.commit()
+    if rate_limit is not None:
+        raise rate_limit
     print(f"Portals: новых лотов {checked}; отправлено {delivered} офферов.", flush=True)
     return delivered
 

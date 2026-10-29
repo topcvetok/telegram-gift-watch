@@ -24,10 +24,12 @@ from runtime_settings import (
 from special_traits import apply_special_bases
 from tonnel_watch import apply_sales_evidence, best_score, decimal, load_rate, slug
 
-API_URL = "https://api.tgmrkt.io/api/v1"
+API_URL = "https://partners.swiftgifts.tg"
 NANOTON = Decimal("1000000000")
 BUYER_MARKUP = Decimal("1.02")
-EVENT_TYPES = ("Sale", "Listing", "ChangePrice")
+EVENT_TYPES = ("buy", "listing", "change_price")
+SWIFT_REQUEST_INTERVAL = 1.05
+_LAST_SWIFT_REQUEST = 0.0
 
 
 class MrktAuthError(RuntimeError):
@@ -42,22 +44,24 @@ class MrktRateLimited(RuntimeError):
 
 def headers(token):
     return {
-        "accept": "application/json, text/plain, */*",
+        "accept": "application/json",
         "content-type": "application/json",
-        "origin": "https://cdn.tgmrkt.io",
-        "referer": "https://cdn.tgmrkt.io/",
-        "authorization": token,
-        "cookie": f"access_token={token}",
+        "x-api-key": token,
     }
 
 
 def request(session, token, method, path, *, body=None, attempts=3):
+    global _LAST_SWIFT_REQUEST
     last_status = None
     for attempt in range(attempts):
         try:
+            wait = SWIFT_REQUEST_INTERVAL - (time.monotonic() - _LAST_SWIFT_REQUEST)
+            if wait > 0:
+                time.sleep(wait)
             response = session.request(
                 method, API_URL + path, headers=headers(token), json=body, timeout=20
             )
+            _LAST_SWIFT_REQUEST = time.monotonic()
             last_status = response.status_code
             if response.status_code == 200:
                 return response.json()
@@ -67,8 +71,12 @@ def request(session, token, method, path, *, body=None, attempts=3):
                 except (TypeError, ValueError):
                     delay = 60
                 raise MrktRateLimited(delay)
-            if response.status_code in (401, 403, 404):
-                raise MrktAuthError("MRKT отклонил токен пользовательской сессии")
+            if response.status_code in (401, 403):
+                raise MrktAuthError(
+                    "Swift Gifts отклонил партнёрский ключ или не разрешил маршрут MRKT"
+                )
+            if response.status_code == 402:
+                raise MrktAuthError("Партнёрский ключ Swift Gifts неактивен")
             if response.status_code not in (500, 502, 503, 504):
                 break
         except (MrktAuthError, MrktRateLimited):
@@ -77,7 +85,10 @@ def request(session, token, method, path, *, body=None, attempts=3):
             pass
         if attempt + 1 < attempts:
             time.sleep(attempt + 1)
-    raise RuntimeError(f"MRKT временно недоступен (HTTP {last_status or 'network'})")
+    raise RuntimeError(
+        f"Партнёрский источник MRKT временно недоступен "
+        f"(HTTP {last_status or 'network'})"
+    )
 
 
 def nano_to_ton(value):
@@ -85,48 +96,20 @@ def nano_to_ton(value):
 
 
 def listing_query(*, collection=None, model=None, backdrop=None, count=20):
-    return {
-        "count": min(20, max(1, int(count))),
-        "cursor": "",
-        "collectionNames": [collection] if collection else [],
-        "modelNames": [model] if model else [],
-        "backdropNames": [backdrop] if backdrop else [],
-        "symbolNames": [],
-        "minPrice": None,
-        "maxPrice": None,
-        "number": None,
-        "isPremarket": False,
-        "isNew": None,
-        "luckyBuy": False,
-        "giftType": None,
-        "craftable": None,
-        "isCrafted": None,
-        "tgCanBeCraftedFrom": None,
-        "removeSelfSales": True,
-        "isTransferable": True,
-        "availableForStaking": None,
-        "forGame": None,
-        "ordering": "Price",
-        "lowToHigh": True,
-        "query": None,
-    }
+    query = {"market": ["mrkt"], "sort_by": "price asc", "fee": 0}
+    if collection:
+        query["collections"] = [collection]
+    if model:
+        query["models"] = [model]
+    if backdrop:
+        query["backdrops"] = [backdrop]
+    return query
 
 
-def feed_query(count=20):
-    return {
-        "count": min(20, max(1, int(count))),
-        "cursor": "",
-        "collectionNames": [],
-        "modelNames": [],
-        "backdropNames": [],
-        "number": None,
-        "type": list(EVENT_TYPES),
-        "minPrice": None,
-        "maxPrice": None,
-        "ordering": "Latest",
-        "lowToHigh": False,
-        "query": None,
-    }
+def feed_query(event_type="listing"):
+    if event_type not in EVENT_TYPES:
+        raise ValueError("Неизвестный тип события Swift Gifts")
+    return {"type": event_type}
 
 
 def parse_time(value):
@@ -136,6 +119,93 @@ def parse_time(value):
         return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
     except (TypeError, ValueError):
         return None
+
+
+def _attribute_name(attributes, name):
+    value = (attributes or {}).get(name)
+    if isinstance(value, dict):
+        return value.get("name")
+    return value if isinstance(value, str) else None
+
+
+def swift_raw_gift(row):
+    """Convert one documented Swift Gifts record to the existing internal shape."""
+    if not isinstance(row, dict):
+        return None
+    normalized = row.get("normalized") or {}
+    gift = normalized.get("gift") or {}
+    price_data = normalized.get("price") or {}
+    attributes = gift.get("attributes") or row.get("attributes") or {}
+    price_ton = next((value for value in (
+        row.get("seller_price_ton"), row.get("sale_price_ton"),
+        price_data.get("seller_ton"), price_data.get("ton"),
+        row.get("price_ton"), row.get("price"), row.get("totalPrice"),
+    ) if value is not None), None)
+    try:
+        price_nano = int(decimal(price_ton, "цена MRKT") * NANOTON)
+    except (TypeError, ValueError):
+        return None
+    gift_id = gift.get("id") or row.get("giftId") or row.get("gift_id")
+    if not gift_id:
+        return None
+    premarket = gift.get("premarket")
+    if premarket is None:
+        premarket = row.get("premarket")
+    on_sale = gift.get("on_sale")
+    if on_sale is None:
+        on_sale = row.get("on_sale", True)
+    return {
+        "id": str(gift_id),
+        "number": gift.get("number") or row.get("number"),
+        "collectionName": gift.get("collection") or row.get("collection")
+        or row.get("title"),
+        "modelName": _attribute_name(attributes, "model") or row.get("model"),
+        "backdropName": _attribute_name(attributes, "backdrop") or row.get("backdrop"),
+        "symbolName": _attribute_name(attributes, "symbol") or row.get("symbol"),
+        "salePrice": price_nano,
+        "isOnSale": on_sale is not False,
+        "isOnAuction": bool(row.get("on_auction")),
+        "isMine": False,
+        "isLocked": False,
+        "isLockedForSale": False,
+        "premarketStatus": "Premarket" if premarket else None,
+        "nextResaleDate": row.get("resale_available_at"),
+        "listingUrl": gift.get("webapp_url") or row.get("webapp_url"),
+        "telegramUrl": gift.get("telegram_url") or row.get("link"),
+        "imageUrl": gift.get("image_url") or row.get("photo_url")
+        or row.get("source_image_url"),
+    }
+
+
+def swift_event(row, event_type):
+    raw = swift_raw_gift(row)
+    if raw is None:
+        return None
+    normalized = row.get("normalized") or {}
+    market = normalized.get("market") or {}
+    price_data = normalized.get("price") or {}
+    native_type = str(market.get("event_type") or row.get("event_type") or event_type)
+    mapped_type = {
+        "buy": "Sale", "purchase": "Sale", "sale": "Sale",
+        "change_price": "ChangePrice", "changeprice": "ChangePrice",
+        "listing": "Listing",
+    }.get(native_type.casefold(), {
+        "buy": "Sale", "change_price": "ChangePrice", "listing": "Listing",
+    }[event_type])
+    event_id = market.get("event_id") or row.get("event_id")
+    if event_id is None:
+        event_id = ":".join((
+            event_type, raw["id"], str(row.get("date") or row.get("listed_at") or ""),
+            str(raw["salePrice"]),
+        ))
+    amount = price_data.get("nano") or raw["salePrice"]
+    return {
+        "id": str(event_id),
+        "type": mapped_type,
+        "amount": int(amount),
+        "date": row.get("date") or row.get("listed_at"),
+        "gift": raw,
+    }
 
 
 def mrkt_item(raw, event=None):
@@ -175,18 +245,32 @@ def mrkt_item(raw, event=None):
         "premarketData": None,
         "underLoan": False,
         "listing_event_id": str(event.get("id")) if isinstance(event, dict) and event.get("id") else None,
+        "listing_url": raw.get("listingUrl"),
+        "telegram_url": raw.get("telegramUrl"),
+        "image_url": raw.get("imageUrl"),
     }
 
 
 def fetch_book(session, token, *, collection, model=None, backdrop=None, count=20):
     payload = request(
-        session, token, "POST", "/gifts/saling",
+        session, token, "POST", f"/api/aggregator?page=0&limit={min(200, max(1, int(count)))}",
         body=listing_query(collection=collection, model=model, backdrop=backdrop, count=count),
     )
-    rows = payload.get("gifts") if isinstance(payload, dict) else None
+    rows = payload.get("items") if isinstance(payload, dict) else None
     if not isinstance(rows, list):
-        raise RuntimeError("MRKT изменил схему каталога")
-    return [item for raw in rows if (item := mrkt_item(raw)) is not None]
+        raise RuntimeError("Swift Gifts изменил схему каталога MRKT")
+    meta = payload.get("meta") or {}
+    if meta.get("partial") or meta.get("providerErrors") or meta.get("providers_disabled"):
+        raise RuntimeError("Партнёрский источник сообщил неполное покрытие MRKT")
+    book = []
+    for row in rows:
+        if str(row.get("provider") or "").casefold() != "mrkt":
+            continue
+        raw = swift_raw_gift(row)
+        item = mrkt_item(raw) if raw else None
+        if item is not None:
+            book.append(item)
+    return book
 
 
 def cached_book(db, session, token, *, collection, config, model=None, backdrop=None):
@@ -260,6 +344,9 @@ def record_sale(event, db):
 
 
 def listing_link(item):
+    direct = str(item.get("listing_url") or "")
+    if direct.startswith("https://"):
+        return direct
     event_id = item.get("listing_event_id")
     if event_id:
         start_param = "feed" + str(event_id).replace("-", "")
@@ -280,7 +367,7 @@ def attach_cross_market_floors(
 
     return add_portals_floor(
         item, result, config, secrets, db, base_market="MRKT",
-        mrkt_session=session, mrkt_token=token,
+        swift_session=session, swift_api_key=token,
     )
 
 
@@ -429,12 +516,36 @@ def process_event(event, config, secrets, db, session, token, send=True):
     return delivered
 
 
-def fetch_feed(session, token, count=20):
-    payload = request(session, token, "POST", "/feed", body=feed_query(count))
-    rows = payload.get("items") if isinstance(payload, dict) else None
+def _action_rows(payload):
+    rows = payload.get("markets") if isinstance(payload, dict) else None
     if not isinstance(rows, list):
-        raise RuntimeError("MRKT изменил схему ленты")
-    return rows
+        raise RuntimeError("Swift Gifts изменил схему событий MRKT")
+    flattened = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        nested = row.get("data")
+        if isinstance(nested, list):
+            flattened.extend(item for item in nested if isinstance(item, dict))
+        else:
+            flattened.append(row)
+    return flattened
+
+
+def fetch_feed(session, token, count=20, event_types=EVENT_TYPES):
+    events = []
+    limit = min(100, max(1, int(count)))
+    for event_type in event_types:
+        payload = request(
+            session, token, "POST",
+            f"/api/actions/services/mrkt?page=0&limit={limit}",
+            body=feed_query(event_type),
+        )
+        for row in _action_rows(payload):
+            event = swift_event(row, event_type)
+            if event is not None:
+                events.append(event)
+    return events
 
 
 def run_cycle(config, secrets, db, session, token, send=True):
@@ -452,11 +563,15 @@ def run_cycle(config, secrets, db, session, token, send=True):
 
 
 def run(config, secrets, db, *, send=True, duration=3300, fail_fast=False):
-    token = str(secrets.get("mrkt_token", "")).strip()
+    token = str(secrets.get("swift_api_key", "")).strip()
     if not token:
         if fail_fast:
-            raise RuntimeError("MRKT_TOKEN не настроен")
-        print("MRKT: токен ещё не настроен; монитор Tonnel продолжает работу.", flush=True)
+            raise RuntimeError("SWIFT_API_KEY не настроен")
+        print(
+            "MRKT: партнёрский ключ Swift Gifts ещё не настроен; "
+            "мониторы Tonnel и Portals продолжают работу.",
+            flush=True,
+        )
         return 0
     db.execute(
         "CREATE TABLE IF NOT EXISTS tonnel_stream_state "

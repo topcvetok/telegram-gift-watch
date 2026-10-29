@@ -46,7 +46,7 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-          MRKT_TOKEN: ${{ secrets.MRKT_TOKEN }}
+          SWIFT_API_KEY: ${{ secrets.SWIFT_API_KEY }}
           ACCESS_CODE: ${{ secrets.ACCESS_CODE }}
           HISTORY_WRITER_TOKEN: ${{ secrets.HISTORY_WRITER_TOKEN }}
         run: |
@@ -62,7 +62,7 @@ jobs:
           Path("secrets.json").write_text(json.dumps({
               "bot_token": token,
               "chat_id": chat_id,
-              "mrkt_token": os.environ.get("MRKT_TOKEN", ""),
+              "swift_api_key": os.environ.get("SWIFT_API_KEY", ""),
               "access_code": os.environ.get("ACCESS_CODE", ""),
               "history_writer_token": os.environ.get("HISTORY_WRITER_TOKEN", ""),
               "history_api_url": "https://tekqdsrukdaijmdpafpi.supabase.co/functions/v1/gift-watch-history",
@@ -72,19 +72,19 @@ jobs:
 
       - name: Check current listings
         env:
-          MRKT_TOKEN: ${{ secrets.MRKT_TOKEN }}
+          SWIFT_API_KEY: ${{ secrets.SWIFT_API_KEY }}
         run: |
           python -u tonnel_watch.py --once --send || echo "::warning::Tonnel initial check failed; the live listener will retry"
           python -u portals_watch.py --once --send || echo "::warning::Portals initial check failed; the live listener will retry"
           python -u upgrade_watch.py --once --send || echo "::warning::Telegram upgrade check failed; the live listener will retry"
-          if [ -n "${MRKT_TOKEN}" ]; then
+          if [ -n "${SWIFT_API_KEY}" ]; then
             python -u mrkt_watch.py --once --send --fail-fast || echo "::warning::MRKT initial check failed; the live listener will retry"
           fi
 
       - name: Listen for new listings in real time
         env:
           STREAM_SECONDS: ${{ inputs.stream_seconds || '3300' }}
-          MRKT_TOKEN: ${{ secrets.MRKT_TOKEN }}
+          SWIFT_API_KEY: ${{ secrets.SWIFT_API_KEY }}
         run: |
           set -u
           mrkt_pid=""
@@ -98,7 +98,7 @@ jobs:
           upgrades_pid=$!
           python -u daily_report.py --send --duration "${STREAM_SECONDS}" &
           report_pid=$!
-          if [ -n "${MRKT_TOKEN}" ]; then
+          if [ -n "${SWIFT_API_KEY}" ]; then
             python -u mrkt_watch.py --send --duration "${STREAM_SECONDS}" &
             mrkt_pid=$!
           fi

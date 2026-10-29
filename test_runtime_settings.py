@@ -192,7 +192,10 @@ class RuntimeSettingsTests(unittest.TestCase):
                 "prices": {"max_lot": {"value": "25", "currency": "ton"}},
                 "sources": {"portals": False},
                 "features": {"dark_upgrades": False},
-                "numbers": {"daily_report_hour": 18},
+                "numbers": {
+                    "daily_report_hour": 18,
+                    "beautiful_number_max_distinct_digits": 2,
+                },
                 "upgrade_backdrops": ["Azure Blue"],
             },
         }]
@@ -207,6 +210,7 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertFalse(current["portals_enabled"])
         self.assertFalse(current["dark_upgrades_enabled"])
         self.assertEqual(current["daily_report_hour"], 18)
+        self.assertEqual(current["beautiful_number_max_distinct_digits"], 2)
         self.assertEqual(current["upgrade_backdrops"], ["Azure Blue"])
 
 
