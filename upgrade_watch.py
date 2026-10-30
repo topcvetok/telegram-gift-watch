@@ -343,9 +343,9 @@ def lowest_book_floor(book):
 
 
 def collection_floor_ton(db, collection, config, secrets=None):
-    """Prefer MRKT via the Swift partner API and fall back to Tonnel."""
+    """Use Tonnel unless MRKT floor access is explicitly enabled."""
     token = str((secrets or {}).get("swift_api_key") or "").strip()
-    if token:
+    if token and config.get("mrkt_floor_enabled", False):
         try:
             from mrkt_watch import cached_book as mrkt_cached_book
 

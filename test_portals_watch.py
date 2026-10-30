@@ -106,6 +106,7 @@ class PortalsTests(unittest.TestCase):
         db = sqlite3.connect(":memory:")
         item = watch.portals_item(raw_gift())
         result = {"rate": Decimal("100")}
+        config = dict(self.config, mrkt_floor_enabled=True)
         with patch.object(
                     watch, "tonnel_model_floor", return_value=Decimal("11"),
                 ), patch.object(
@@ -116,7 +117,7 @@ class PortalsTests(unittest.TestCase):
                     watch, "collection_stats", return_value={"sales_24h_count": 5},
                 ):
             enriched = watch.add_portals_floor(
-                item, result, self.config, {"swift_api_key": "token"}, db,
+                item, result, config, {"swift_api_key": "token"}, db,
                 portals_session=Mock(), swift_session=Mock(),
             )
         self.assertEqual(
@@ -128,6 +129,29 @@ class PortalsTests(unittest.TestCase):
              ("Portals", Decimal("12")),
              ("MRKT", Decimal("11.8"))],
         )
+
+    def test_mrkt_floor_is_disabled_by_default(self):
+        db = sqlite3.connect(":memory:")
+        item = watch.portals_item(raw_gift())
+        result = {"rate": Decimal("100")}
+        with patch.object(
+                    watch, "tonnel_model_floor", return_value=Decimal("11"),
+                ), patch.object(
+                    watch, "portals_model_floor", return_value=Decimal("12"),
+                ), patch.object(
+                    watch, "mrkt_model_floor",
+                    side_effect=AssertionError("MRKT floor must not be requested"),
+                ), patch.object(
+                    watch, "collection_stats", return_value={"sales_24h_count": 5},
+                ):
+            enriched = watch.add_portals_floor(
+                item, result, self.config, {"swift_api_key": "token"}, db,
+                portals_session=Mock(), swift_session=Mock(),
+            )
+        floors = {row["market"]: row["model_floor"] for row in enriched["market_floors"]}
+        self.assertEqual(floors["Tonnel"], Decimal("11"))
+        self.assertEqual(floors["Portals"], Decimal("12"))
+        self.assertIsNone(floors["MRKT"])
 
     def test_cached_book_restores_decimal_prices(self):
         db = sqlite3.connect(":memory:")

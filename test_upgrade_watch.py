@@ -137,9 +137,15 @@ class UpgradeWatchTests(unittest.TestCase):
              "gift_id": 2, "price": "11.75"},
         ]
         with sqlite3.connect(":memory:") as db, \
-                patch.object(watch, "load_collection_book", return_value=book):
+                patch.object(watch, "load_collection_book", return_value=book), \
+                patch(
+                    "mrkt_watch.cached_book",
+                    side_effect=AssertionError("MRKT floor must not be requested"),
+                ):
             self.assertEqual(
-                watch.collection_floor_ton(db, "Plush Pepe", {}, {}),
+                watch.collection_floor_ton(
+                    db, "Plush Pepe", {}, {"swift_api_key": "token"}
+                ),
                 (Decimal("11.75"), "Tonnel"),
             )
 
@@ -154,7 +160,8 @@ class UpgradeWatchTests(unittest.TestCase):
                 patch.object(watch, "load_collection_book") as tonnel:
             self.assertEqual(
                 watch.collection_floor_ton(
-                    db, "Plush Pepe", {}, {"swift_api_key": "token"}
+                    db, "Plush Pepe", {"mrkt_floor_enabled": True},
+                    {"swift_api_key": "token"}
                 ),
                 (Decimal("9.5"), "MRKT"),
             )

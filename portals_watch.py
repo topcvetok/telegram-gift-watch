@@ -474,7 +474,7 @@ def add_portals_floor(
     token = str(
         swift_api_key if swift_api_key is not None else secrets.get("swift_api_key", "")
     ).strip()
-    if token:
+    if token and config.get("mrkt_floor_enabled", False):
         from mrkt_watch import MrktAuthError, MrktRateLimited
 
         def collect_mrkt(session):

@@ -206,11 +206,16 @@ class MrktTests(unittest.TestCase):
         ]
         model_book = collection_book[:3]
 
-        def book(*args, **kwargs):
-            return model_book if kwargs.get("model") or kwargs.get("backdrop") else collection_book
-
         with patch.object(watch, "load_rate", return_value=Decimal("100")), \
-                patch.object(watch, "cached_book", side_effect=book), \
+                patch.object(watch, "load_collection_book", return_value=collection_book), \
+                patch.object(
+                    watch, "load_variant_books",
+                    return_value={("model", "Watcher"): model_book},
+                ), \
+                patch.object(
+                    watch, "cached_book",
+                    side_effect=AssertionError("MRKT floor must not be requested"),
+                ), \
                 patch.object(
                     watch, "attach_cross_market_floors",
                     side_effect=lambda *args, **kwargs: args[1],

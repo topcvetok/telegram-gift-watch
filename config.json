@@ -40,6 +40,7 @@
   "mrkt_feed_limit": 20,
   "mrkt_book_cache_seconds": 20,
   "mrkt_round_trip_cost_fraction": 0.0196078431,
+  "mrkt_floor_enabled": false,
   "max_pages": 2,
   "monitor_all_collections": true,
   "tonnel_collections": [

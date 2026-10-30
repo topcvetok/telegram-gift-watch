@@ -22,7 +22,10 @@ from runtime_settings import (
     activate_settings, active_profiles, item_allowed, source_enabled, threshold_ton,
 )
 from special_traits import apply_special_bases
-from tonnel_watch import apply_sales_evidence, best_score, decimal, load_rate, slug
+from tonnel_watch import (
+    apply_sales_evidence, best_score, decimal, listing_backdrop_config,
+    load_collection_book, load_rate, load_variant_books, slug,
+)
 
 API_URL = "https://partners.swiftgifts.tg"
 NANOTON = Decimal("1000000000")
@@ -365,9 +368,11 @@ def attach_cross_market_floors(
         return None
     from portals_watch import add_portals_floor
 
+    floor_secrets = dict(secrets)
+    floor_secrets.pop("swift_api_key", None)
     return add_portals_floor(
-        item, result, config, secrets, db, base_market="MRKT",
-        swift_session=session, swift_api_key=token,
+        item, result, config, floor_secrets, db, base_market="MRKT",
+        swift_session=session, swift_api_key="",
     )
 
 
@@ -478,20 +483,16 @@ def process_event(event, config, secrets, db, session, token, send=True):
             ]
             if profiles:
                 collection = item.get("name")
-                collection_book = cached_book(
-                    db, session, token, collection=collection, config=config
-                )
-                variant_books = {}
-                if item.get("model"):
-                    variant_books[("model", item["model"])] = cached_book(
-                        db, session, token, collection=collection,
-                        model=item["model"], config=config,
-                    )
+                collection_book = load_collection_book(db, collection, config)
+                book_config = listing_backdrop_config(config, profiles)
+                force_keys = [("model", item.get("model"))]
                 if item.get("backdrop"):
-                    variant_books[("backdrop", item["backdrop"])] = cached_book(
-                        db, session, token, collection=collection,
-                        backdrop=item["backdrop"], config=config,
-                    )
+                    force_keys.append(("backdrop", item["backdrop"]))
+                variant_books = load_variant_books(
+                    db, collection, [item], rate, book_config,
+                    [int(config.get("variant_query_budget_per_event", 2))],
+                    force_keys=force_keys,
+                )
                 delivered = 0
                 for chat_id, user_config in profiles:
                     score_config = mrkt_scoring_config(user_config)
