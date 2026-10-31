@@ -252,6 +252,7 @@ class PortalsTests(unittest.TestCase):
     def test_listing_is_scored_with_model_and_allowed_backdrop(self):
         db = sqlite3.connect(":memory:")
         item = watch.portals_item(raw_gift())
+        diagnostics = {}
         collection = [
             watch.portals_item(raw_gift(f"c{i}", str(12 + i / 100))) for i in range(5)
         ]
@@ -278,14 +279,33 @@ class PortalsTests(unittest.TestCase):
                 patch.object(watch, "add_portals_floor", side_effect=cross_floors), \
                 patch.object(watch, "telegram") as send:
             self.assertTrue(watch.process_listing(
-                item, self.config, {}, db, Mock(), "", send=True
+                item, self.config, {}, db, Mock(), "", send=True,
+                diagnostics=diagnostics,
             ))
         self.assertEqual(send.call_count, 1)
+        self.assertEqual(diagnostics, {"sent": 1})
         message = send.call_args.args[1]
         self.assertIn("оффер на Portals", message)
         self.assertIn("• модель: 11.000 TON", message)
         self.assertNotIn("• коллекция:", message)
         self.assertIn("активность за 24 ч: 82", message)
+
+    def test_diagnostics_explain_price_limit_rejection(self):
+        db = sqlite3.connect(":memory:")
+        item = watch.portals_item(raw_gift(price="8"))
+        diagnostics = {}
+        config = dict(self.config, max_lot_rub=100)
+        with patch.object(watch, "load_rate", return_value=Decimal("100")), \
+                patch.object(watch, "cached_book") as book:
+            self.assertEqual(
+                watch.process_listing(
+                    item, config, {}, db, Mock(), "", send=False,
+                    diagnostics=diagnostics,
+                ),
+                0,
+            )
+        book.assert_not_called()
+        self.assertEqual(diagnostics, {"over_budget": 1})
 
     def test_feed_records_listing_and_price_change_once(self):
         db = sqlite3.connect(":memory:")

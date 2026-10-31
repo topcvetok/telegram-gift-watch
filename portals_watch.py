@@ -592,16 +592,28 @@ def send_if_new_price(item, result, config, secrets, db, send=True, *, chat_id=N
     return True
 
 
-def process_listing(item, config, secrets, db, session, token, send=True):
+def process_listing(
+        item, config, secrets, db, session, token, send=True, diagnostics=None):
     rate = load_rate(db)
-    profiles = [
+    source_profiles = [
         (chat_id, user_config)
         for chat_id, user_config in active_profiles(config)
         if source_enabled(user_config, "portals")
-        and item_allowed(item, user_config)
-        and item["price"] <= threshold_ton(user_config, "max_lot", rate)
+    ]
+    allowed_profiles = [
+        (chat_id, user_config)
+        for chat_id, user_config in source_profiles
+        if item_allowed(item, user_config)
+    ]
+    profiles = [
+        (chat_id, user_config)
+        for chat_id, user_config in allowed_profiles
+        if item["price"] <= threshold_ton(user_config, "max_lot", rate)
     ]
     if not profiles:
+        if diagnostics is not None:
+            reason = "filtered_lists" if not allowed_profiles else "over_budget"
+            diagnostics[reason] = diagnostics.get(reason, 0) + 1
         return 0
     collection_book = []
     if any(feature_enabled(user_config, "collection_basis") for _, user_config in profiles):
@@ -642,14 +654,20 @@ def process_listing(item, config, secrets, db, session, token, send=True):
         result = apply_special_bases(item, result, score_config, db)
         result = apply_sales_evidence(item, result, db, score_config)
         if result is None:
+            if diagnostics is not None:
+                diagnostics["no_basis"] = diagnostics.get("no_basis", 0) + 1
             continue
         result = add_portals_floor(
             item, result, user_config, secrets, db, base_market="Portals",
             portals_session=session, portals_token=token,
         )
-        delivered += int(send_if_new_price(
+        was_sent = bool(send_if_new_price(
             item, result, user_config, secrets, db, send, chat_id=chat_id
         ))
+        delivered += int(was_sent)
+        if diagnostics is not None:
+            key = "sent" if was_sent else "duplicate"
+            diagnostics[key] = diagnostics.get(key, 0) + 1
     return delivered
 
 
@@ -670,6 +688,7 @@ def run_cycle(config, secrets, db, session, token="", send=True):
     delivered = 0
     checked = 0
     rate_limit = None
+    diagnostics = {}
     for item in reversed(latest):
         key = str(item["gift_id"])
         old = db.execute("SELECT price FROM portals_seen WHERE id=?", (key,)).fetchone()
@@ -692,7 +711,10 @@ def run_cycle(config, secrets, db, session, token="", send=True):
         checked += 1
         processed = False
         try:
-            delivered += int(process_listing(item, config, secrets, db, session, token, send))
+            delivered += int(process_listing(
+                item, config, secrets, db, session, token, send,
+                diagnostics=diagnostics,
+            ))
             processed = True
         except PortalsRateLimited as exc:
             rate_limit = exc
@@ -709,7 +731,15 @@ def run_cycle(config, secrets, db, session, token="", send=True):
     db.commit()
     if rate_limit is not None:
         raise rate_limit
-    print(f"Portals: новых лотов {checked}; отправлено {delivered} офферов.", flush=True)
+    print(
+        "Portals: новых лотов "
+        f"{checked}; списки={diagnostics.get('filtered_lists', 0)}; "
+        f"дороже лимита={diagnostics.get('over_budget', 0)}; "
+        f"без подходящего основания={diagnostics.get('no_basis', 0)}; "
+        f"повторы={diagnostics.get('duplicate', 0)}; "
+        f"отправлено={delivered}.",
+        flush=True,
+    )
     return delivered
 
 
